@@ -11,6 +11,8 @@ import './ui/codex.css'
 import './ui/reward.css'
 import './ui/fusion.css'
 import './ui/meta.css'
+import './ui/settings.css'
+import './ui/juice.css'
 
 initializeBrowserPersistence()
 
