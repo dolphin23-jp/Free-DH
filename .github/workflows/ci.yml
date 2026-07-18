@@ -39,13 +39,4 @@ jobs:
         run: pnpm sim -- --runs 1
 
       - name: Build
-        run: |
-          set -o pipefail
-          pnpm build 2>&1 | tee build.log
-
-      - name: Upload build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: t14-build-log
-          path: build.log
+        run: pnpm build
