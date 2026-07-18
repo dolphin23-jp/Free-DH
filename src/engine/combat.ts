@@ -1,5 +1,12 @@
 import { enemies, gameConfig, items } from '../data'
-import type { ActiveEffect, EnemyAbility, EnemyEffect, Item, Passive } from '../data/schema'
+import type {
+  ActiveEffect,
+  EnemyAbility,
+  EnemyEffect,
+  Item,
+  Passive,
+  TriggerEffect,
+} from '../data/schema'
 import { nextMulberry32, normalizeSeed, type Seed } from './rng'
 import {
   advanceStatusDurations,
@@ -20,9 +27,12 @@ const EPSILON = 1e-9
 const PRECISION_DIGITS = 10
 const DAMAGE_PRECISION_FACTOR = 10
 const TICKS_PER_SECOND = 10
+const DEFAULT_HP_BELOW_PERCENT = 50
 
 export type CombatResult = 'ongoing' | 'playerVictory' | 'playerDefeat'
 export type CombatSide = 'player' | 'enemy'
+export type CombatTriggerName = TriggerEffect['trigger']
+export type CombatTriggerEffectType = TriggerEffect['type']
 
 export interface GridPosition {
   row: number
@@ -38,6 +48,14 @@ export interface ResolvedItemModifiersInput {
   cooldownMultiplier?: number
 }
 
+export interface CombatTriggerEffect {
+  trigger: CombatTriggerName
+  type: CombatTriggerEffectType
+  value: number
+  status?: StatusKind
+  thresholdPercent?: number
+}
+
 export interface BuildItemInput {
   instanceId: string
   itemId: string
@@ -45,6 +63,7 @@ export interface BuildItemInput {
   sealed?: boolean
   initialCooldown?: number
   resolvedModifiers?: ResolvedItemModifiersInput
+  resolvedTriggers?: readonly CombatTriggerEffect[]
 }
 
 export interface PlayerSetupOverrides {
@@ -64,6 +83,7 @@ export interface EnemySetupOverrides {
   blockCap?: number
   initialCooldowns?: readonly number[]
   statuses?: StatusSetup
+  triggers?: readonly CombatTriggerEffect[]
 }
 
 export interface CombatSetup {
@@ -93,6 +113,7 @@ export interface PlayerItemState {
   staminaCost: number
   effects: readonly ActiveEffect[]
   passives: readonly Passive[]
+  triggers: readonly CombatTriggerEffect[]
   modifiers: ResolvedItemModifiers
 }
 
@@ -125,6 +146,7 @@ export interface EnemyCombatState {
   phaseIndex: number
   statuses: StatusState
   abilities: EnemyAbilityState[]
+  triggers: readonly CombatTriggerEffect[]
 }
 
 export interface CombatState {
@@ -132,6 +154,10 @@ export interface CombatState {
   time: number
   result: CombatResult
   rngState: number
+  battleStarted: boolean
+  terminalTriggersResolved: boolean
+  consumedTriggerKeys: string[]
+  goldGained: number
   player: PlayerCombatState
   enemy: EnemyCombatState
 }
@@ -155,10 +181,20 @@ export interface CombatDamage {
   status?: StatusKind
 }
 
+export interface CombatTriggerEvent {
+  sourceSide: CombatSide
+  sourceId: string
+  trigger: CombatTriggerName
+  effectType: CombatTriggerEffectType
+  value: number
+  depth: 1
+}
+
 export interface TickResult {
   state: CombatState
   activations: CombatActivation[]
   damages: CombatDamage[]
+  triggerEvents: CombatTriggerEvent[]
 }
 
 export interface DamageCalculationInput {
@@ -175,6 +211,17 @@ export interface DamageCalculationInput {
 export interface DamageCalculation {
   amount: number
   critical: boolean
+}
+
+interface TriggerSource {
+  side: CombatSide
+  sourceId: string
+  triggerIndex: number
+  effect: CombatTriggerEffect
+}
+
+interface TriggerContext {
+  attackerSide?: CombatSide
 }
 
 const itemById = new Map<string, Item>(items.map((item) => [item.id, item]))
@@ -225,6 +272,10 @@ function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0)
 }
 
+function oppositeSide(side: CombatSide): CombatSide {
+  return side === 'player' ? 'enemy' : 'player'
+}
+
 function getItemDefinition(itemId: string): Item {
   const item = itemById.get(itemId)
 
@@ -246,7 +297,7 @@ function getInitialEnemy(enemyId: string): {
     throw new Error(`Unknown enemy id: ${enemyId}`)
   }
 
-  if ('phases' in enemy) {
+  if ('phases' in enemy && enemy.phases !== undefined) {
     const firstPhase = enemy.phases[0]
 
     return {
@@ -289,6 +340,37 @@ function createResolvedModifiers(input?: ResolvedItemModifiersInput): ResolvedIt
   }
 }
 
+function createCombatTrigger(
+  input: TriggerEffect | CombatTriggerEffect,
+  label: string,
+): CombatTriggerEffect {
+  const thresholdPercent =
+    input.trigger === 'hpBelow'
+      ? requireFiniteNonNegative(
+          'thresholdPercent' in input && input.thresholdPercent !== undefined
+            ? input.thresholdPercent
+            : DEFAULT_HP_BELOW_PERCENT,
+          `${label}.thresholdPercent`,
+        )
+      : undefined
+
+  if (thresholdPercent !== undefined && thresholdPercent > 100) {
+    throw new RangeError(`${label}.thresholdPercent must be at most 100`)
+  }
+
+  if (input.type === 'applyStatus' && input.status === undefined) {
+    throw new Error(`${label}.status is required for applyStatus`)
+  }
+
+  return {
+    trigger: input.trigger,
+    type: input.type,
+    value: requireFinite(input.value, `${label}.value`),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(thresholdPercent === undefined ? {} : { thresholdPercent }),
+  }
+}
+
 function createPlayerItemState(input: BuildItemInput): PlayerItemState {
   const item = getItemDefinition(input.itemId)
   const baseCooldown = item.cooldown ?? null
@@ -296,6 +378,13 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
   if (baseCooldown === null && input.initialCooldown !== undefined) {
     throw new Error(`Passive item ${item.id} cannot define an initial cooldown`)
   }
+
+  const dataTriggers = (item.triggers ?? []).map((trigger, index) =>
+    createCombatTrigger(trigger, `${input.instanceId}.triggers[${index}]`),
+  )
+  const resolvedTriggers = (input.resolvedTriggers ?? []).map((trigger, index) =>
+    createCombatTrigger(trigger, `${input.instanceId}.resolvedTriggers[${index}]`),
+  )
 
   return {
     instanceId: input.instanceId,
@@ -316,6 +405,7 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
     staminaCost: item.stamina ?? 0,
     effects: item.effects ?? [],
     passives: item.passives ?? [],
+    triggers: [...dataTriggers, ...resolvedTriggers],
     modifiers: createResolvedModifiers(input.resolvedModifiers),
   }
 }
@@ -476,12 +566,19 @@ export function createCombatState(setup: CombatSetup): CombatState {
     setup.enemy?.blockCap ?? Number.MAX_SAFE_INTEGER,
     'enemy.blockCap',
   )
+  const enemyTriggers = (setup.enemy?.triggers ?? []).map((trigger, index) =>
+    createCombatTrigger(trigger, `enemy.triggers[${index}]`),
+  )
 
   const state: CombatState = {
     tick: 0,
     time: 0,
     result: 'ongoing',
     rngState: normalizeSeed(setup.seed),
+    battleStarted: false,
+    terminalTriggersResolved: false,
+    consumedTriggerKeys: [],
+    goldGained: 0,
     player: {
       hp: playerHp,
       maxHp: playerMaxHp,
@@ -523,6 +620,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
         baseCooldown: ability.cooldown,
         effects: ability.effects,
       })),
+      triggers: enemyTriggers,
     },
   }
 
@@ -538,6 +636,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
 function cloneCombatState(state: CombatState): CombatState {
   return {
     ...state,
+    consumedTriggerKeys: [...state.consumedTriggerKeys],
     player: {
       ...state.player,
       statuses: cloneStatusState(state.player.statuses),
@@ -567,6 +666,14 @@ function applyBlock(target: { block: number; blockCap: number }, amount: number)
   target.block = normalizeNumber(Math.min(target.blockCap, target.block + amount))
 }
 
+function applyHeal(target: { hp: number; maxHp: number }, amount: number): void {
+  if (amount <= 0) {
+    return
+  }
+
+  target.hp = normalizeNumber(Math.min(target.maxHp, target.hp + amount))
+}
+
 function applyDamage(
   target: { hp: number; block: number },
   amount: number,
@@ -587,12 +694,64 @@ function applyDamage(
   return { blocked: normalizeNumber(blocked), hpDamage }
 }
 
-function updateResultAfterDamage(state: CombatState): void {
-  if (state.enemy.hp <= 0) {
-    state.result = 'playerVictory'
-  } else if (state.player.hp <= 0) {
-    state.result = 'playerDefeat'
+function getSideState(state: CombatState, side: CombatSide): PlayerCombatState | EnemyCombatState {
+  return side === 'player' ? state.player : state.enemy
+}
+
+function compareGridOrder(left: PlayerItemState, right: PlayerItemState): number {
+  return (
+    left.position.row - right.position.row ||
+    left.position.column - right.position.column ||
+    left.instanceId.localeCompare(right.instanceId)
+  )
+}
+
+function getAllTriggerSources(
+  state: CombatState,
+  side: CombatSide,
+  trigger: CombatTriggerName,
+): TriggerSource[] {
+  if (side === 'enemy') {
+    return state.enemy.triggers.flatMap((effect, triggerIndex) =>
+      effect.trigger === trigger
+        ? [{ side, sourceId: state.enemy.id, triggerIndex, effect }]
+        : [],
+    )
   }
+
+  return [...state.player.items]
+    .sort(compareGridOrder)
+    .flatMap((item) =>
+      item.sealed
+        ? []
+        : item.triggers.flatMap((effect, triggerIndex) =>
+            effect.trigger === trigger
+              ? [{ side, sourceId: item.instanceId, triggerIndex, effect }]
+              : [],
+          ),
+    )
+}
+
+function getOnHitTriggerSources(
+  state: CombatState,
+  side: CombatSide,
+  sourceId: string,
+): TriggerSource[] {
+  if (side === 'enemy') {
+    return getAllTriggerSources(state, side, 'onHit')
+  }
+
+  const item = state.player.items.find((candidate) => candidate.instanceId === sourceId)
+
+  if (!item || item.sealed) {
+    return []
+  }
+
+  return item.triggers.flatMap((effect, triggerIndex) =>
+    effect.trigger === 'onHit'
+      ? [{ side, sourceId: item.instanceId, triggerIndex, effect }]
+      : [],
+  )
 }
 
 function takeRandom(state: CombatState): number {
@@ -604,8 +763,259 @@ function takeRandom(state: CombatState): number {
 function pushNormalDamage(
   damages: CombatDamage[],
   input: Omit<CombatDamage, 'trueDamage' | 'triggersAllowed'>,
+): CombatDamage {
+  const damage = { ...input, trueDamage: false, triggersAllowed: true }
+  damages.push(damage)
+  return damage
+}
+
+function pushTriggeredDamage(
+  damages: CombatDamage[],
+  input: Omit<CombatDamage, 'trueDamage' | 'triggersAllowed'>,
+): CombatDamage {
+  const damage = { ...input, trueDamage: false, triggersAllowed: false }
+  damages.push(damage)
+  return damage
+}
+
+function triggerKey(source: TriggerSource): string {
+  return `${source.side}:${source.sourceId}:${source.triggerIndex}:${source.effect.trigger}`
+}
+
+function resolveTriggerSources(
+  state: CombatState,
+  sources: readonly TriggerSource[],
+  context: TriggerContext,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
-  damages.push({ ...input, trueDamage: false, triggersAllowed: true })
+  for (const source of sources) {
+    if (
+      state.result !== 'ongoing' &&
+      source.effect.trigger !== 'onKill' &&
+      source.effect.trigger !== 'battleWin' &&
+      source.effect.trigger !== 'onHit'
+    ) {
+      return
+    }
+
+    triggerEvents.push({
+      sourceSide: source.side,
+      sourceId: source.sourceId,
+      trigger: source.effect.trigger,
+      effectType: source.effect.type,
+      value: source.effect.value,
+      depth: 1,
+    })
+
+    executeTriggerEffect(state, source, context, damages, triggerEvents)
+  }
+}
+
+function resolveTerminalTriggers(
+  state: CombatState,
+  winnerSide: CombatSide,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  if (state.terminalTriggersResolved) {
+    return
+  }
+
+  state.terminalTriggersResolved = true
+  resolveTriggerSources(
+    state,
+    getAllTriggerSources(state, winnerSide, 'onKill'),
+    {},
+    damages,
+    triggerEvents,
+  )
+  resolveTriggerSources(
+    state,
+    getAllTriggerSources(state, winnerSide, 'battleWin'),
+    {},
+    damages,
+    triggerEvents,
+  )
+}
+
+function updateResultAndResolveTerminal(
+  state: CombatState,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  if (state.enemy.hp <= 0) {
+    state.result = 'playerVictory'
+    resolveTerminalTriggers(state, 'player', damages, triggerEvents)
+  } else if (state.player.hp <= 0) {
+    state.result = 'playerDefeat'
+    resolveTerminalTriggers(state, 'enemy', damages, triggerEvents)
+  }
+}
+
+function executeTriggerEffect(
+  state: CombatState,
+  source: TriggerSource,
+  context: TriggerContext,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  const owner = getSideState(state, source.side)
+  const opponentSide = oppositeSide(source.side)
+  const opponent = getSideState(state, opponentSide)
+
+  if (source.effect.type === 'heal') {
+    applyHeal(owner, source.effect.value)
+    return
+  }
+
+  if (source.effect.type === 'block') {
+    applyBlock(owner, source.effect.value)
+    return
+  }
+
+  if (source.effect.type === 'gold') {
+    if (source.side === 'player') {
+      state.goldGained = normalizeNumber(state.goldGained + source.effect.value)
+    }
+    return
+  }
+
+  if (source.effect.type === 'applyStatus') {
+    if (source.effect.status !== undefined) {
+      applyStatus(opponent.statuses, source.effect.status, source.effect.value)
+    }
+    return
+  }
+
+  const targetSide =
+    source.effect.type === 'reflect' && context.attackerSide !== undefined
+      ? context.attackerSide
+      : opponentSide
+  const target = getSideState(state, targetSide)
+  const amount = Math.max(0, source.effect.value)
+  const applied = applyDamage(target, amount, false)
+
+  pushTriggeredDamage(damages, {
+    sourceSide: source.side,
+    targetSide,
+    sourceId: source.sourceId,
+    amount,
+    critical: false,
+    blocked: applied.blocked,
+    hpDamage: applied.hpDamage,
+    pierce: false,
+  })
+  updateResultAndResolveTerminal(state, damages, triggerEvents)
+}
+
+function resolveHpBelowCrossing(
+  state: CombatState,
+  targetSide: CombatSide,
+  beforeHp: number,
+  afterHp: number,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  for (const source of getAllTriggerSources(state, targetSide, 'hpBelow')) {
+    const key = triggerKey(source)
+    const threshold =
+      getSideState(state, targetSide).maxHp *
+      ((source.effect.thresholdPercent ?? DEFAULT_HP_BELOW_PERCENT) / 100)
+
+    if (
+      state.consumedTriggerKeys.includes(key) ||
+      beforeHp < threshold ||
+      afterHp >= threshold
+    ) {
+      continue
+    }
+
+    state.consumedTriggerKeys.push(key)
+    resolveTriggerSources(state, [source], {}, damages, triggerEvents)
+  }
+}
+
+function applyDirectDamage(
+  state: CombatState,
+  input: {
+    sourceSide: CombatSide
+    targetSide: CombatSide
+    sourceId: string
+    amount: number
+    critical: boolean
+    pierce: boolean
+  },
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  const target = getSideState(state, input.targetSide)
+  const beforeHp = target.hp
+  const applied = applyDamage(target, input.amount, input.pierce)
+  const afterHp = target.hp
+  const damage = pushNormalDamage(damages, {
+    ...input,
+    blocked: applied.blocked,
+    hpDamage: applied.hpDamage,
+  })
+
+  if (afterHp <= 0) {
+    state.result = input.targetSide === 'enemy' ? 'playerVictory' : 'playerDefeat'
+  }
+
+  resolveTriggerSources(
+    state,
+    getOnHitTriggerSources(state, damage.sourceSide, damage.sourceId),
+    {},
+    damages,
+    triggerEvents,
+  )
+
+  if (afterHp <= 0) {
+    resolveTerminalTriggers(state, input.sourceSide, damages, triggerEvents)
+    return
+  }
+
+  if (state.result !== 'ongoing') {
+    return
+  }
+
+  if (damage.blocked > 0 || damage.hpDamage > 0) {
+    resolveTriggerSources(
+      state,
+      getAllTriggerSources(state, damage.targetSide, 'onDamaged'),
+      { attackerSide: damage.sourceSide },
+      damages,
+      triggerEvents,
+    )
+  }
+
+  if (state.result !== 'ongoing') {
+    return
+  }
+
+  if (damage.amount > 0 && damage.blocked === damage.amount && damage.hpDamage === 0) {
+    resolveTriggerSources(
+      state,
+      getAllTriggerSources(state, damage.targetSide, 'onBlocked'),
+      { attackerSide: damage.sourceSide },
+      damages,
+      triggerEvents,
+    )
+  }
+
+  if (state.result !== 'ongoing') {
+    return
+  }
+
+  resolveHpBelowCrossing(
+    state,
+    damage.targetSide,
+    beforeHp,
+    afterHp,
+    damages,
+    triggerEvents,
+  )
 }
 
 function applyTrueStatusDamage(
@@ -614,16 +1024,19 @@ function applyTrueStatusDamage(
   status: 'poison' | 'burn',
   amount: number,
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
   if (amount <= 0 || state.result !== 'ongoing') {
     return
   }
 
-  const target = targetSide === 'player' ? state.player : state.enemy
+  const target = getSideState(state, targetSide)
+  const beforeHp = target.hp
   const applied = applyDamage(target, amount, true)
+  const afterHp = target.hp
 
   damages.push({
-    sourceSide: targetSide === 'player' ? 'enemy' : 'player',
+    sourceSide: oppositeSide(targetSide),
     targetSide,
     sourceId: `status:${status}`,
     amount: normalizeNumber(amount),
@@ -635,35 +1048,88 @@ function applyTrueStatusDamage(
     triggersAllowed: false,
     status,
   })
-  updateResultAfterDamage(state)
+
+  if (afterHp <= 0) {
+    updateResultAndResolveTerminal(state, damages, triggerEvents)
+    return
+  }
+
+  resolveHpBelowCrossing(state, targetSide, beforeHp, afterHp, damages, triggerEvents)
 }
 
 function resolveStatusDamageForSide(
   state: CombatState,
   targetSide: CombatSide,
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
-  const statuses = targetSide === 'player' ? state.player.statuses : state.enemy.statuses
+  const statuses = getSideState(state, targetSide).statuses
 
   // Poison before burn is the provisional within-entity ordering recorded in SPEC_TODO.
-  applyTrueStatusDamage(state, targetSide, 'poison', statuses.poisonStacks, damages)
-  applyTrueStatusDamage(state, targetSide, 'burn', getBurnStacks(statuses), damages)
+  applyTrueStatusDamage(
+    state,
+    targetSide,
+    'poison',
+    statuses.poisonStacks,
+    damages,
+    triggerEvents,
+  )
+  applyTrueStatusDamage(
+    state,
+    targetSide,
+    'burn',
+    getBurnStacks(statuses),
+    damages,
+    triggerEvents,
+  )
 }
 
-function resolveIntegerSecondStatusDamage(state: CombatState, damages: CombatDamage[]): void {
+function resolveIntegerSecondStatusDamage(
+  state: CombatState,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
   if (state.tick % TICKS_PER_SECOND !== 0) {
     return
   }
 
   // COMBAT_SPEC §3: Player status damage is resolved before Enemy status damage.
-  resolveStatusDamageForSide(state, 'player', damages)
-  resolveStatusDamageForSide(state, 'enemy', damages)
+  resolveStatusDamageForSide(state, 'player', damages, triggerEvents)
+  resolveStatusDamageForSide(state, 'enemy', damages, triggerEvents)
+}
+
+function resolveBattleStart(
+  state: CombatState,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  if (state.battleStarted) {
+    return
+  }
+
+  state.battleStarted = true
+  // Sealing must already be resolved before this point. Sealed items are excluded by source lookup.
+  resolveTriggerSources(
+    state,
+    getAllTriggerSources(state, 'player', 'battleStart'),
+    {},
+    damages,
+    triggerEvents,
+  )
+  resolveTriggerSources(
+    state,
+    getAllTriggerSources(state, 'enemy', 'battleStart'),
+    {},
+    damages,
+    triggerEvents,
+  )
 }
 
 function resolvePlayerEffects(
   state: CombatState,
   source: PlayerItemState,
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
   for (const effect of source.effects) {
     if (effect.type === 'damage' && effect.value !== undefined) {
@@ -684,22 +1150,24 @@ function resolvePlayerEffects(
         damageReduction: 0,
         randomValue: takeRandom(state),
       })
-      const pierce = effect.pierce ?? false
-      const applied = applyDamage(state.enemy, calculation.amount, pierce)
 
-      pushNormalDamage(damages, {
-        sourceSide: 'player',
-        targetSide: 'enemy',
-        sourceId: source.instanceId,
-        amount: calculation.amount,
-        critical: calculation.critical,
-        blocked: applied.blocked,
-        hpDamage: applied.hpDamage,
-        pierce,
-      })
-      updateResultAfterDamage(state)
+      applyDirectDamage(
+        state,
+        {
+          sourceSide: 'player',
+          targetSide: 'enemy',
+          sourceId: source.instanceId,
+          amount: calculation.amount,
+          critical: calculation.critical,
+          pierce: effect.pierce ?? false,
+        },
+        damages,
+        triggerEvents,
+      )
     } else if (effect.type === 'block' && effect.value !== undefined) {
       applyBlock(state.player, effect.value)
+    } else if (effect.type === 'heal' && effect.value !== undefined) {
+      applyHeal(state.player, effect.value)
     } else if (
       effect.type === 'applyStatus' &&
       effect.status !== undefined &&
@@ -720,6 +1188,7 @@ function resolveEnemyEffects(
   state: CombatState,
   source: EnemyAbilityState,
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
   for (const effect of source.effects) {
     if (effect.type === 'damage') {
@@ -730,19 +1199,20 @@ function resolveEnemyEffects(
         damageReduction: getGlobalPassiveTotal(state.player, 'damageReduction'),
         randomValue: takeRandom(state),
       })
-      const applied = applyDamage(state.player, calculation.amount, false)
 
-      pushNormalDamage(damages, {
-        sourceSide: 'enemy',
-        targetSide: 'player',
-        sourceId: `${state.enemy.id}:ability:${source.index}`,
-        amount: calculation.amount,
-        critical: calculation.critical,
-        blocked: applied.blocked,
-        hpDamage: applied.hpDamage,
-        pierce: false,
-      })
-      updateResultAfterDamage(state)
+      applyDirectDamage(
+        state,
+        {
+          sourceSide: 'enemy',
+          targetSide: 'player',
+          sourceId: `${state.enemy.id}:ability:${source.index}`,
+          amount: calculation.amount,
+          critical: calculation.critical,
+          pierce: false,
+        },
+        damages,
+        triggerEvents,
+      )
     } else if (
       effect.type === 'applyStatus' &&
       effect.status !== undefined &&
@@ -757,18 +1227,11 @@ function resolveEnemyEffects(
   }
 }
 
-function compareGridOrder(left: PlayerItemState, right: PlayerItemState): number {
-  return (
-    left.position.row - right.position.row ||
-    left.position.column - right.position.column ||
-    left.instanceId.localeCompare(right.instanceId)
-  )
-}
-
 function activatePlayerItems(
   state: CombatState,
   activations: CombatActivation[],
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
   const orderedItems = [...state.player.items].sort(compareGridOrder)
 
@@ -789,7 +1252,7 @@ function activatePlayerItems(
     state.player.stamina = normalizeNumber(state.player.stamina - item.staminaCost)
     item.cooldown = calculatePlayerItemCooldown(state, item)
     activations.push({ side: 'player', sourceId: item.instanceId })
-    resolvePlayerEffects(state, item, damages)
+    resolvePlayerEffects(state, item, damages, triggerEvents)
   }
 }
 
@@ -797,6 +1260,7 @@ function activateEnemyAbilities(
   state: CombatState,
   activations: CombatActivation[],
   damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
 ): void {
   for (const ability of state.enemy.abilities) {
     if (state.result !== 'ongoing') {
@@ -812,27 +1276,33 @@ function activateEnemyAbilities(
       side: 'enemy',
       sourceId: `${state.enemy.id}:ability:${ability.index}`,
     })
-    resolveEnemyEffects(state, ability, damages)
+    resolveEnemyEffects(state, ability, damages, triggerEvents)
   }
 }
 
 export function stepCombat(state: CombatState): TickResult {
   if (state.result !== 'ongoing') {
-    return { state, activations: [], damages: [] }
+    return { state, activations: [], damages: [], triggerEvents: [] }
   }
 
   const nextState = cloneCombatState(state)
   const activations: CombatActivation[] = []
   const damages: CombatDamage[] = []
+  const triggerEvents: CombatTriggerEvent[] = []
+
+  resolveBattleStart(nextState, damages, triggerEvents)
+  if (nextState.result !== 'ongoing') {
+    return { state: nextState, activations, damages, triggerEvents }
+  }
 
   // §3.1: advance the integer tick first; derive time to avoid accumulated drift.
   nextState.tick += 1
   nextState.time = normalizeNumber(nextState.tick * TICK_SECONDS)
 
   // §3.2: status True damage at integer seconds, Player then Enemy.
-  resolveIntegerSecondStatusDamage(nextState, damages)
+  resolveIntegerSecondStatusDamage(nextState, damages, triggerEvents)
   if (nextState.result !== 'ongoing') {
-    return { state: nextState, activations, damages }
+    return { state: nextState, activations, damages, triggerEvents }
   }
 
   // §3.3 sudden death is introduced with enemy traits in T09.
@@ -865,10 +1335,10 @@ export function stepCombat(state: CombatState): TickResult {
   advanceStatusDurations(nextState.enemy.statuses)
 
   // §3.6-7: player grid order, then enemy ability array order.
-  activatePlayerItems(nextState, activations, damages)
-  activateEnemyAbilities(nextState, activations, damages)
+  activatePlayerItems(nextState, activations, damages, triggerEvents)
+  activateEnemyAbilities(nextState, activations, damages, triggerEvents)
 
-  return { state: nextState, activations, damages }
+  return { state: nextState, activations, damages, triggerEvents }
 }
 
 export function runTicks(initialState: CombatState, count: number): CombatState {
