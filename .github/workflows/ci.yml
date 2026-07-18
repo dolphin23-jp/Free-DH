@@ -30,8 +30,8 @@ jobs:
       - name: Generate and verify exact lockfile
         shell: bash
         run: |
-          pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts
-          echo "c7bed3e51bbee11d9d42e5f560dcfc38bc31fd76417c3c26f56ff217d5225b16  pnpm-lock.yml" | sha256sum --check --strict
+          pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts --reporter=silent
+          echo "c7bed3e51bbee11d9d42e5f560dcfc38bc31fd76417c3c26f56ff217d5225b16  pnpm-lock.yaml" | sha256sum --check --strict
 
       - name: Write deployment configuration
         shell: bash
@@ -97,7 +97,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pnpm-lock.yml vercel.json .github/workflows/ci.yml
+          git add pnpm-lock.yaml vercel.json .github/workflows/ci.yml
           git diff --cached --quiet && { echo "No changes to commit"; exit 1; }
           git commit -m "Fix Vercel pnpm installs with frozen lockfile"
           git push origin HEAD:agent/fix-vercel-pnpm-lock
