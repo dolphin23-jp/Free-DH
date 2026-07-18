@@ -8,6 +8,7 @@ import './ui/drop.css'
 import './ui/shop.css'
 import './ui/codex.css'
 import './ui/reward.css'
+import './ui/fusion.css'
 
 const root = document.getElementById('root')
 

@@ -1,0 +1,148 @@
+.item-card.is-fusion-ready {
+  animation: fusion-ready-pulse 1.35s ease-in-out infinite;
+  box-shadow:
+    0 0 0 2px rgb(139 226 196 / 78%),
+    0 0 1.2rem rgb(91 213 174 / 52%),
+    inset 0 0 0 1px rgb(255 255 255 / 10%);
+}
+
+@keyframes fusion-ready-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.25);
+  }
+}
+
+.fusion-candidates {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.fusion-candidates__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #9ddac8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fusion-candidate-button {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid rgb(118 218 187 / 28%);
+  border-radius: 0.7rem;
+  background: linear-gradient(145deg, rgb(57 113 96 / 34%), rgb(255 255 255 / 3%));
+  color: #e6f8f1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fusion-candidate-button:hover {
+  border-color: rgb(139 226 196 / 65%);
+  filter: brightness(1.12);
+}
+
+.fusion-candidate-button span {
+  color: #b9c9c3;
+  font-size: 0.7rem;
+}
+
+.fusion-candidate-button strong {
+  font-size: 0.86rem;
+}
+
+.fusion-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(5 8 7 / 78%);
+  backdrop-filter: blur(9px);
+}
+
+.fusion-dialog {
+  width: min(100%, 32rem);
+  padding: clamp(1.4rem, 5vw, 2.2rem);
+  border: 1px solid rgb(139 226 196 / 32%);
+  border-radius: 1.2rem;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(75 145 122 / 30%), transparent 18rem),
+    #171b19;
+  box-shadow: 0 2rem 6rem rgb(0 0 0 / 58%);
+}
+
+.fusion-dialog h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.5rem, 5vw, 2.2rem);
+}
+
+.fusion-dialog > p:not(.eyebrow) {
+  color: #b9c2bd;
+  line-height: 1.6;
+}
+
+.fusion-dialog__formula {
+  display: grid;
+  gap: 0.35rem;
+  margin: 1.2rem 0;
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.8rem;
+  background: rgb(0 0 0 / 22%);
+}
+
+.fusion-dialog__formula span {
+  color: #b9c2bd;
+}
+
+.fusion-dialog__formula strong {
+  color: #a9ead5;
+  font-size: 1.15rem;
+}
+
+.fusion-dialog__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 1.4rem;
+}
+
+.fusion-dialog__actions button {
+  padding: 0.8rem 1rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 6%);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.fusion-dialog__actions .fusion-confirm-button {
+  border-color: rgb(139 226 196 / 32%);
+  background: linear-gradient(180deg, #397d67, #245143);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-card.is-fusion-ready {
+    animation: none;
+  }
+}
+
+@media (max-width: 28rem) {
+  .fusion-dialog__actions {
+    grid-template-columns: 1fr;
+  }
+}

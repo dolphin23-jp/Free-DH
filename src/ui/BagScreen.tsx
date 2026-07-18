@@ -24,6 +24,13 @@ import {
   reorderStorageItem,
   rotateBagItem,
 } from '../store/bag'
+import { codexStore } from '../store/codex'
+import {
+  findFusionCandidates,
+  fuseInventory,
+  getFusionCandidateKey,
+  type FusionCandidate,
+} from '../store/fusion'
 import {
   runStore,
   type RunInventoryItem,
@@ -93,12 +100,14 @@ function DraggableItem({
   item,
   source,
   selected,
+  fusionReady = false,
   style,
   onSelect,
 }: {
   item: RunInventoryItem
   source: DragData['source']
   selected: boolean
+  fusionReady?: boolean
   style?: CSSProperties
   onSelect: () => void
 }) {
@@ -120,7 +129,7 @@ function DraggableItem({
       type="button"
       className={`item-card rarity-${getItemDefinition(item.itemId).rarity}${
         selected ? ' is-selected' : ''
-      }${isDragging ? ' is-dragging' : ''}`}
+      }${fusionReady ? ' is-fusion-ready' : ''}${isDragging ? ' is-dragging' : ''}`}
       style={dragStyle}
       onClick={onSelect}
       aria-label={`${getItemDefinition(item.itemId).name}を選択してドラッグ`}
@@ -186,10 +195,23 @@ function ActionButton({
   )
 }
 
+function FusionLabel({ candidate }: { candidate: FusionCandidate }) {
+  return (
+    <>
+      <span>
+        {getItemDefinition(candidate.firstItemId).name} ＋{' '}
+        {getItemDefinition(candidate.secondItemId).name}
+      </span>
+      <strong>→ {getItemDefinition(candidate.resultItemId).name}</strong>
+    </>
+  )
+}
+
 export function BagScreen() {
   const state = useStore(runStore)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
+  const [pendingFusion, setPendingFusion] = useState<FusionCandidate | null>(null)
   const [notice, setNotice] = useState('アイテムをドラッグして配置を組み替えられます。')
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -199,6 +221,17 @@ export function BagScreen() {
   const inventory = useMemo<RunInventorySnapshot>(
     () => ({ bag: state.bag, storage: state.storage }),
     [state.bag, state.storage],
+  )
+  const fusionCandidates = useMemo(() => findFusionCandidates(state.bag), [state.bag])
+  const fusionReadyIds = useMemo(
+    () =>
+      new Set(
+        fusionCandidates.flatMap((candidate) => [
+          candidate.firstInstanceId,
+          candidate.secondInstanceId,
+        ]),
+      ),
+    [fusionCandidates],
   )
   const selectedBagItem = state.bag.items.find((item) => item.instanceId === selectedId)
   const selectedStorageItem = state.storage.items.find((item) => item.instanceId === selectedId)
@@ -213,11 +246,13 @@ export function BagScreen() {
   const startDemo = () => {
     state.startRun('t13-demo', createDemoInventory())
     setSelectedId(null)
+    setPendingFusion(null)
     setNotice('デモ周回を開始しました。')
   }
 
   const applyInventory = (next: RunInventorySnapshot, message: string) => {
     state.replaceInventory(next)
+    setPendingFusion(null)
     setNotice(message)
   }
 
@@ -285,7 +320,26 @@ export function BagScreen() {
     state.replaceInventory(next)
     runStore.setState((current) => ({ gold: current.gold + price }))
     setSelectedId(null)
+    setPendingFusion(null)
     setNotice(`${getItemDefinition(item.itemId).name}を${price}Gで売却しました。`)
+  }
+
+  const confirmFusion = () => {
+    if (pendingFusion === null) return
+    try {
+      const completed = fuseInventory(inventory, pendingFusion)
+      state.replaceInventory(completed.inventory)
+      codexStore.getState().discoverRecipe(completed.recipe.id)
+      codexStore.getState().discoverItems([completed.resultItem.itemId])
+      setSelectedId(completed.resultItem.instanceId)
+      setPendingFusion(null)
+      setNotice(
+        `${getItemDefinition(completed.resultItem.itemId).name}へ融合しました。レシピ${completed.recipe.id}を図鑑に登録しました。`,
+      )
+    } catch (error) {
+      setPendingFusion(null)
+      setNotice(error instanceof Error ? error.message : '融合を実行できませんでした。')
+    }
   }
 
   if (state.phase === 'idle') {
@@ -367,6 +421,7 @@ export function BagScreen() {
                     item={item}
                     source="bag"
                     selected={selectedId === item.instanceId}
+                    fusionReady={fusionReadyIds.has(item.instanceId)}
                     onSelect={() => setSelectedId(item.instanceId)}
                     style={{
                       gridColumn: `${item.position.column + 1} / span ${size.columns}`,
@@ -431,6 +486,28 @@ export function BagScreen() {
                 </div>
               </>
             )}
+
+            <section className="fusion-candidates" aria-label="融合候補">
+              <div className="fusion-candidates__heading">
+                <span>Fusion</span>
+                <strong>{fusionCandidates.length}件</strong>
+              </div>
+              {fusionCandidates.length === 0 ? (
+                <p className="muted">レシピになる装備を上下左右に隣接させてください。</p>
+              ) : (
+                fusionCandidates.map((candidate) => (
+                  <button
+                    key={getFusionCandidateKey(candidate)}
+                    type="button"
+                    className="fusion-candidate-button"
+                    onClick={() => setPendingFusion(candidate)}
+                  >
+                    <FusionLabel candidate={candidate} />
+                  </button>
+                ))
+              )}
+            </section>
+
             <p className="notice" role="status">
               {notice}
             </p>
@@ -450,6 +527,34 @@ export function BagScreen() {
           )}
         </DragOverlay>
       </DndContext>
+
+      {pendingFusion === null ? null : (
+        <div className="fusion-dialog-backdrop">
+          <section
+            className="fusion-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fusion-dialog-title"
+          >
+            <p className="eyebrow">Recipe {pendingFusion.recipeId}</p>
+            <h2 id="fusion-dialog-title">この2つを融合しますか？</h2>
+            <div className="fusion-dialog__formula">
+              <FusionLabel candidate={pendingFusion} />
+            </div>
+            <p>
+              素材2個は消費されます。結果装備は空いた位置を優先してカバンへ配置されます。
+            </p>
+            <div className="fusion-dialog__actions">
+              <button type="button" onClick={() => setPendingFusion(null)}>
+                キャンセル
+              </button>
+              <button type="button" className="fusion-confirm-button" onClick={confirmFusion}>
+                融合を確定
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   )
 }
