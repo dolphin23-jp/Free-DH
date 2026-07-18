@@ -4,6 +4,7 @@ import { useStore } from 'zustand'
 import { affixPool, items } from '../data'
 import { resolveAffixEffects } from '../engine/affixes'
 import type { DropBatch, DroppedItem } from '../engine/drops'
+import { codexStore } from '../store/codex'
 import { runStore, type RunInventoryItem } from '../store/run'
 
 interface DropScreenProps {
@@ -135,7 +136,10 @@ export function DropScreen({ batch, onComplete }: DropScreenProps) {
             resolved={decisions[drop.instanceId]}
             canClaim={storageAvailable}
             onOpen={() => {
-              if (index === openedCount) setOpenedCount((current) => current + 1)
+              if (index === openedCount) {
+                codexStore.getState().discoverItems([drop.itemId])
+                setOpenedCount((current) => current + 1)
+              }
             }}
             onClaim={() => claimDrop(drop)}
             onDiscard={() => discardDrop(drop)}

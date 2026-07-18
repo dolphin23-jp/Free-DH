@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 
-import { enemies } from '../data'
+import { enemies, type RuntimeEnemy } from '../data'
 import { removeTemporaryAffixMaxHp } from '../engine/affixes'
 import { getDropLuckPercent } from '../engine/drops'
 import { createCombatReplay } from '../engine/replay'
+import { codexStore, getEnemyPreview } from '../store/codex'
 import { dropProgressStore } from '../store/drop-progress'
 import {
   battleResolutionFromCombatState,
@@ -15,16 +16,31 @@ import {
 import { shopStore } from '../store/shop'
 import { BagScreen } from './BagScreen'
 import { BattleView } from './BattleView'
+import { CodexScreen } from './CodexScreen'
 import { DropScreen } from './DropScreen'
 import { ShopScreen } from './ShopScreen'
 
 const enemyById = new Map(enemies.map((enemy) => [enemy.id, enemy]))
-const enemyNameById = new Map(enemies.map((enemy) => [enemy.id, enemy.name]))
+
+function enemyHpText(enemy: RuntimeEnemy): string {
+  if ('hp' in enemy) return `HP ${enemy.hp}`
+  return enemy.phases.map((phase, index) => `P${index + 1} ${phase.hp}`).join(' / ')
+}
+
+function enemyAbilityText(enemy: RuntimeEnemy): string {
+  const names =
+    'hp' in enemy
+      ? enemy.abilities.map((ability) => ability.name)
+      : enemy.phases.flatMap((phase) => phase.abilities.map((ability) => ability.name))
+  return names.slice(0, 3).join(' / ')
+}
 
 export function GameScreen() {
   const state = useStore(runStore)
+  const codex = useStore(codexStore)
   const dropProgress = useStore(dropProgressStore)
   const [shopOpen, setShopOpen] = useState(false)
+  const [codexOpen, setCodexOpen] = useState(false)
 
   useEffect(() => {
     if (state.phase === 'idle') {
@@ -32,6 +48,15 @@ export function GameScreen() {
       setShopOpen(false)
     }
   }, [state.phase])
+
+  useEffect(() => {
+    codexStore
+      .getState()
+      .discoverItems([
+        ...state.bag.items.map((item) => item.itemId),
+        ...state.storage.items.map((item) => item.itemId),
+      ])
+  }, [state.bag.items, state.storage.items])
 
   const combatSetup = useMemo(
     () => (state.phase === 'battle' ? selectCurrentCombatSetup(state) : null),
@@ -50,8 +75,10 @@ export function GameScreen() {
     [combatSetup],
   )
   const currentEnemyId = getCurrentEnemyId(state)
-  const currentEnemyName =
-    currentEnemyId === null ? null : (enemyNameById.get(currentEnemyId) ?? currentEnemyId)
+  const currentEnemyPreview =
+    currentEnemyId === null
+      ? null
+      : getEnemyPreview(currentEnemyId, codex.discoveredEnemyIds)
   const expectedDropBattleIndex =
     state.phase === 'result' ? state.battleIndex : Math.max(0, state.battleIndex - 1)
   const pendingBatch =
@@ -67,6 +94,10 @@ export function GameScreen() {
         onComplete={() => dropProgress.clearPendingBatch(pendingBatch.key)}
       />
     )
+  }
+
+  if (codexOpen && state.phase !== 'battle') {
+    return <CodexScreen onClose={() => setCodexOpen(false)} />
   }
 
   if (shopOpen && state.phase === 'preBattle') {
@@ -133,9 +164,14 @@ export function GameScreen() {
               <dd>{Math.round(state.gold)}G</dd>
             </div>
           </dl>
-          <button type="button" className="result-button" onClick={state.resetRun}>
-            ホームへ戻る
-          </button>
+          <div className="result-action-row">
+            <button type="button" className="codex-inline-button" onClick={() => setCodexOpen(true)}>
+              図鑑を見る
+            </button>
+            <button type="button" className="result-button" onClick={state.resetRun}>
+              ホームへ戻る
+            </button>
+          </div>
         </section>
       </main>
     )
@@ -154,27 +190,46 @@ export function GameScreen() {
     setShopOpen(true)
   }
 
+  const beginEncounter = () => {
+    if (state.phase !== 'preBattle' || currentEnemyId === null) return
+    codexStore.getState().discoverEnemy(currentEnemyId)
+    setShopOpen(false)
+    setCodexOpen(false)
+    state.beginBattle()
+  }
+
   return (
     <>
       <BagScreen />
-      {state.phase === 'preBattle' && currentEnemyName !== null ? (
+      {state.phase === 'idle' ? (
+        <button type="button" className="codex-launch" onClick={() => setCodexOpen(true)}>
+          図鑑
+        </button>
+      ) : null}
+      {state.phase === 'preBattle' && currentEnemyPreview !== null ? (
         <aside className="battle-launch" aria-label="次の戦闘">
-          <div>
-            <span>NEXT ENEMY</span>
-            <strong>{currentEnemyName}</strong>
+          <div className={`enemy-forecast${currentEnemyPreview.discovered ? '' : ' is-unknown'}`}>
+            <span>
+              {currentEnemyPreview.discovered ? 'NEXT ENEMY' : 'FIRST ENCOUNTER'} · AREA {currentEnemyPreview.area}
+            </span>
+            <strong>{currentEnemyPreview.name}</strong>
+            <small>{currentEnemyPreview.hint}</small>
+            {currentEnemyPreview.discovered ? (
+              <div className="enemy-forecast__details">
+                <em>{enemyHpText(currentEnemyPreview.enemy)}</em>
+                <em>報酬 {currentEnemyPreview.enemy.gold}G</em>
+                <em>{enemyAbilityText(currentEnemyPreview.enemy)}</em>
+              </div>
+            ) : null}
           </div>
           <div className="battle-launch__actions">
+            <button type="button" className="codex-launch-button" onClick={() => setCodexOpen(true)}>
+              図鑑
+            </button>
             <button type="button" className="shop-launch-button" onClick={openShop}>
               ショップ
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShopOpen(false)
-                state.beginBattle()
-              }}
-              disabled={state.bag.items.length === 0}
-            >
+            <button type="button" onClick={beginEncounter} disabled={state.bag.items.length === 0}>
               戦闘開始
             </button>
           </div>

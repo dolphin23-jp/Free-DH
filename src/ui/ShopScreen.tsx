@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 
 import { gameConfig, items } from '../data'
 import { getRerollCost, getShopSellPrice, type ShopOffer } from '../engine/shop'
+import { codexStore } from '../store/codex'
 import {
   applyShopHeal,
   purchaseShopOffer,
@@ -30,6 +31,12 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
     ...state.bag.items.map((item) => ({ item, source: 'カバン' })),
     ...state.storage.items.map((item) => ({ item, source: 'ストレージ' })),
   ]
+
+  useEffect(() => {
+    if (shop.listing !== null) {
+      codexStore.getState().discoverItems(shop.listing.offers.map((offer) => offer.itemId))
+    }
+  }, [shop.listing])
 
   if (shop.listing === null) {
     return (

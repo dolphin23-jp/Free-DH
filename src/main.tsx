@@ -6,6 +6,7 @@ import './ui/styles.css'
 import './ui/battle.css'
 import './ui/drop.css'
 import './ui/shop.css'
+import './ui/codex.css'
 
 const root = document.getElementById('root')
 
