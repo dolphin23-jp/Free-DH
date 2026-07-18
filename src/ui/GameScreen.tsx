@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 
 import { enemies } from '../data'
@@ -12,9 +12,11 @@ import {
   runStore,
   selectCurrentCombatSetup,
 } from '../store/run'
+import { shopStore } from '../store/shop'
 import { BagScreen } from './BagScreen'
 import { BattleView } from './BattleView'
 import { DropScreen } from './DropScreen'
+import { ShopScreen } from './ShopScreen'
 
 const enemyById = new Map(enemies.map((enemy) => [enemy.id, enemy]))
 const enemyNameById = new Map(enemies.map((enemy) => [enemy.id, enemy.name]))
@@ -22,6 +24,15 @@ const enemyNameById = new Map(enemies.map((enemy) => [enemy.id, enemy.name]))
 export function GameScreen() {
   const state = useStore(runStore)
   const dropProgress = useStore(dropProgressStore)
+  const [shopOpen, setShopOpen] = useState(false)
+
+  useEffect(() => {
+    if (state.phase === 'idle') {
+      shopStore.getState().resetShop()
+      setShopOpen(false)
+    }
+  }, [state.phase])
+
   const combatSetup = useMemo(
     () => (state.phase === 'battle' ? selectCurrentCombatSetup(state) : null),
     [
@@ -56,6 +67,10 @@ export function GameScreen() {
         onComplete={() => dropProgress.clearPendingBatch(pendingBatch.key)}
       />
     )
+  }
+
+  if (shopOpen && state.phase === 'preBattle') {
+    return <ShopScreen onClose={() => setShopOpen(false)} />
   }
 
   if (state.phase === 'battle') {
@@ -126,6 +141,19 @@ export function GameScreen() {
     )
   }
 
+  const openShop = () => {
+    if (state.phase !== 'preBattle' || state.runSeed === null || currentEnemyId === null) return
+    const enemy = enemyById.get(currentEnemyId)
+    if (enemy === undefined) throw new Error('Shop enemy metadata is unavailable')
+    shopStore.getState().prepareShop({
+      runSeed: state.runSeed,
+      battleIndex: state.battleIndex,
+      area: enemy.area as 1 | 2 | 3,
+      abyssLevel: 0,
+    })
+    setShopOpen(true)
+  }
+
   return (
     <>
       <BagScreen />
@@ -135,9 +163,21 @@ export function GameScreen() {
             <span>NEXT ENEMY</span>
             <strong>{currentEnemyName}</strong>
           </div>
-          <button type="button" onClick={state.beginBattle} disabled={state.bag.items.length === 0}>
-            戦闘開始
-          </button>
+          <div className="battle-launch__actions">
+            <button type="button" className="shop-launch-button" onClick={openShop}>
+              ショップ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShopOpen(false)
+                state.beginBattle()
+              }}
+              disabled={state.bag.items.length === 0}
+            >
+              戦闘開始
+            </button>
+          </div>
         </aside>
       ) : null}
     </>
