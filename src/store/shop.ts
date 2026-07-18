@@ -7,6 +7,7 @@ import {
   type ShopGenerationRequest,
   type ShopListing,
   type ShopOffer,
+  type ShopSpecialOffer,
 } from '../engine/shop'
 import { cloneInventory, removeInventoryItem } from './bag'
 import type { RunInventoryItem, RunInventorySnapshot } from './run'
@@ -15,6 +16,8 @@ export interface ShopSessionData {
   listing: ShopListing | null
   purchasedSlots: number[]
   healUsed: boolean
+  cursedChestPurchased: boolean
+  gamblerPurchased: boolean
 }
 
 export interface ShopSessionActions {
@@ -22,6 +25,7 @@ export interface ShopSessionActions {
   reroll: () => ShopListing
   markPurchased: (slot: number) => void
   markHealUsed: () => void
+  markSpecialPurchased: (kind: ShopSpecialOffer['kind']) => void
   resetShop: () => void
 }
 
@@ -62,6 +66,26 @@ export function shopOfferToInventoryItem(offer: ShopOffer): RunInventoryItem {
   }
 }
 
+export function shopSpecialToInventoryItem(offer: ShopSpecialOffer): RunInventoryItem {
+  const item: RunInventoryItem = {
+    instanceId: offer.reward.instanceId,
+    itemId: offer.reward.itemId,
+    affixIds: [],
+    rotated: false,
+    runDamageBonus: 0,
+  }
+  if (offer.kind === 'cursedChest') {
+    item.resolvedTriggers = [
+      {
+        trigger: 'battleStart',
+        type: 'maxHp',
+        value: -gameConfig.shop.cursedChest.maxHpPenalty,
+      },
+    ]
+  }
+  return item
+}
+
 export function purchaseShopOffer(
   inventory: RunInventorySnapshot,
   gold: number,
@@ -77,6 +101,23 @@ export function purchaseShopOffer(
   const item = shopOfferToInventoryItem(offer)
   next.storage.items.push(item)
   return { inventory: next, gold: currentGold - offer.price, item }
+}
+
+export function purchaseShopSpecialOffer(
+  inventory: RunInventorySnapshot,
+  gold: number,
+  offer: ShopSpecialOffer,
+): ShopPurchaseResult {
+  const currentGold = requireFiniteNonNegative(gold, 'gold')
+  if (currentGold < offer.cost) throw new Error('Not enough gold')
+  if (inventory.storage.items.length >= inventory.storage.capacity) {
+    throw new Error('Storage is full')
+  }
+
+  const next = cloneInventory(inventory)
+  const item = shopSpecialToInventoryItem(offer)
+  next.storage.items.push(item)
+  return { inventory: next, gold: currentGold - offer.cost, item }
 }
 
 export function sellInventoryItemToShop(
@@ -117,7 +158,13 @@ export function applyShopHeal(
 }
 
 function createInitialData(): ShopSessionData {
-  return { listing: null, purchasedSlots: [], healUsed: false }
+  return {
+    listing: null,
+    purchasedSlots: [],
+    healUsed: false,
+    cursedChestPurchased: false,
+    gamblerPurchased: false,
+  }
 }
 
 export function createShopStore(): StoreApi<ShopSessionState> {
@@ -130,7 +177,13 @@ export function createShopStore(): StoreApi<ShopSessionState> {
       if (current.listing?.key === key) return current.listing
 
       const listing = generateShopListing({ ...request, rerollCount: 0 })
-      set({ listing, purchasedSlots: [], healUsed: false })
+      set({
+        listing,
+        purchasedSlots: [],
+        healUsed: false,
+        cursedChestPurchased: false,
+        gamblerPurchased: false,
+      })
       return listing
     },
 
@@ -161,6 +214,8 @@ export function createShopStore(): StoreApi<ShopSessionState> {
     },
 
     markHealUsed: () => set({ healUsed: true }),
+    markSpecialPurchased: (kind) =>
+      set(kind === 'cursedChest' ? { cursedChestPurchased: true } : { gamblerPurchased: true }),
     resetShop: () => set(createInitialData()),
   }))
 }
