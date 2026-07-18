@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const raritySchema = z.enum(['common', 'uncommon', 'rare', 'epic', 'legendary'])
 export const itemTagSchema = z.enum(['weapon', 'shield', 'armor', 'tool', 'bottle', 'trinket'])
+export const enemyTagSchema = z.enum(['undead'])
 export const statusSchema = z.enum(['poison', 'burn', 'slow'])
 export const triggerSchema = z.enum([
   'battleStart',
@@ -125,6 +126,17 @@ export const affixSchema = z
     message: 'An affix must define exactly one passive or trigger',
   })
 
+const specialsRequiringValue = new Set([
+  'execute',
+  'battleScalingDamage',
+  'runScalingDamage',
+  'poisonFinisher',
+  'guardianHeal',
+  'runMaxHpOnKill',
+  'undeadSlayer',
+  'healPercentOnWin',
+])
+
 export const itemSchema = z
   .object({
     id: z.string().regex(/^(W|A|T|C|E|F)\d{2}$/),
@@ -176,6 +188,17 @@ export const itemSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Items with active effects must define cooldown and stamina',
+      })
+    }
+
+    if (
+      item.special !== undefined &&
+      specialsRequiringValue.has(item.special) &&
+      item.specialValue === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${item.special} requires specialValue`,
       })
     }
   })
@@ -239,6 +262,7 @@ const enemyMetadataShape = {
   gold: z.number().int().nonnegative(),
   hint: z.string().min(1),
   counterTags: z.array(z.string().min(1)),
+  tags: z.array(enemyTagSchema).optional(),
 }
 
 export const enemyPhaseSchema = z
@@ -457,6 +481,7 @@ export const configSchema = z
   .strict()
 
 export type Rarity = z.infer<typeof raritySchema>
+export type EnemyTag = z.infer<typeof enemyTagSchema>
 export type ActiveEffect = z.infer<typeof activeEffectSchema>
 export type Passive = z.infer<typeof passiveSchema>
 export type TriggerEffect = z.infer<typeof triggerEffectSchema>

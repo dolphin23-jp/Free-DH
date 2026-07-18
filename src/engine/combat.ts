@@ -4,11 +4,13 @@ import type {
   Adjacency,
   EnemyAbility,
   EnemyEffect,
+  EnemyTag,
   Item,
   Passive,
+  Rarity,
   TriggerEffect,
 } from '../data/schema'
-import { areItemsAdjacent, type GridPosition } from './adjacency'
+import { areItemsAdjacent, getOccupiedCells, type GridPosition } from './adjacency'
 import { nextMulberry32, normalizeSeed, type Seed } from './rng'
 import {
   advanceStatusDurations,
@@ -30,11 +32,20 @@ const PRECISION_DIGITS = 10
 const DAMAGE_PRECISION_FACTOR = 10
 const TICKS_PER_SECOND = 10
 const DEFAULT_HP_BELOW_PERCENT = 50
+const GUARDIAN_HEAL_THRESHOLD_PERCENT = 30
+
+const RARITY_RANK: Readonly<Record<Rarity, number>> = {
+  common: 0,
+  uncommon: 1,
+  rare: 2,
+  epic: 3,
+  legendary: 4,
+}
 
 export type CombatResult = 'ongoing' | 'playerVictory' | 'playerDefeat'
 export type CombatSide = 'player' | 'enemy'
 export type CombatTriggerName = TriggerEffect['trigger']
-export type CombatTriggerEffectType = TriggerEffect['type']
+export type CombatTriggerEffectType = TriggerEffect['type'] | 'maxHp' | 'healPercent'
 
 export type { GridPosition } from './adjacency'
 
@@ -67,6 +78,7 @@ export interface BuildItemInput {
   initialCooldown?: number
   resolvedModifiers?: ResolvedItemModifiersInput
   resolvedTriggers?: readonly CombatTriggerEffect[]
+  runDamageBonus?: number
 }
 
 export interface PlayerSetupOverrides {
@@ -81,6 +93,7 @@ export interface PlayerSetupOverrides {
 }
 
 export interface EnemySetupOverrides {
+  maxHp?: number
   hp?: number
   block?: number
   blockCap?: number
@@ -120,6 +133,12 @@ export interface PlayerItemState {
   baseCooldown: number | null
   staminaCost: number
   baseStaminaCost: number
+  battleDamageBonus: number
+  runDamageBonus: number
+  virtual: boolean
+  duplicateOfInstanceId?: string
+  duplicatedByInstanceId?: string
+  usesDefaultInitialCooldown: boolean
   effects: readonly ActiveEffect[]
   passives: readonly Passive[]
   triggers: readonly CombatTriggerEffect[]
@@ -153,6 +172,7 @@ export interface EnemyCombatState {
   block: number
   blockCap: number
   phaseIndex: number
+  tags: readonly EnemyTag[]
   statuses: StatusState
   abilities: EnemyAbilityState[]
   triggers: readonly CombatTriggerEffect[]
@@ -299,6 +319,7 @@ function getInitialEnemy(enemyId: string): {
   hp: number
   abilities: readonly EnemyAbility[]
   phaseIndex: number
+  tags: readonly EnemyTag[]
 } {
   const enemy = enemyById.get(enemyId)
 
@@ -313,6 +334,7 @@ function getInitialEnemy(enemyId: string): {
       hp: firstPhase.hp,
       abilities: firstPhase.abilities,
       phaseIndex: 0,
+      tags: enemy.tags ?? [],
     }
   }
 
@@ -320,6 +342,7 @@ function getInitialEnemy(enemyId: string): {
     hp: enemy.hp,
     abilities: enemy.abilities,
     phaseIndex: 0,
+    tags: enemy.tags ?? [],
   }
 }
 
@@ -389,6 +412,49 @@ function createCombatTrigger(
   }
 }
 
+function requireSpecialValue(item: Item): number {
+  if (item.specialValue === undefined) {
+    throw new Error(`${item.id}.${item.special} requires specialValue`)
+  }
+
+  return requireFinite(item.specialValue, `${item.id}.specialValue`)
+}
+
+function createItemSpecialTriggers(item: Item): CombatTriggerEffect[] {
+  if (item.special === 'guardianHeal') {
+    return [
+      {
+        trigger: 'hpBelow',
+        type: 'heal',
+        value: requireSpecialValue(item),
+        thresholdPercent: GUARDIAN_HEAL_THRESHOLD_PERCENT,
+      },
+    ]
+  }
+
+  if (item.special === 'runMaxHpOnKill') {
+    return [
+      {
+        trigger: 'onKill',
+        type: 'maxHp',
+        value: requireSpecialValue(item),
+      },
+    ]
+  }
+
+  if (item.special === 'healPercentOnWin') {
+    return [
+      {
+        trigger: 'battleWin',
+        type: 'healPercent',
+        value: requireSpecialValue(item),
+      },
+    ]
+  }
+
+  return []
+}
+
 function createPlayerItemState(input: BuildItemInput): PlayerItemState {
   const item = getItemDefinition(input.itemId)
   const baseCooldown = item.cooldown ?? null
@@ -402,6 +468,9 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
   )
   const resolvedTriggers = (input.resolvedTriggers ?? []).map((trigger, index) =>
     createCombatTrigger(trigger, `${input.instanceId}.resolvedTriggers[${index}]`),
+  )
+  const specialTriggers = createItemSpecialTriggers(item).map((trigger, index) =>
+    createCombatTrigger(trigger, `${input.instanceId}.specialTriggers[${index}]`),
   )
 
   return {
@@ -424,10 +493,113 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
     baseCooldown,
     staminaCost: item.stamina ?? 0,
     baseStaminaCost: item.stamina ?? 0,
+    battleDamageBonus: 0,
+    runDamageBonus: requireFiniteNonNegative(
+      input.runDamageBonus ?? 0,
+      `${input.instanceId}.runDamageBonus`,
+    ),
+    virtual: false,
+    usesDefaultInitialCooldown: input.initialCooldown === undefined,
     effects: item.effects ?? [],
     passives: item.passives ?? [],
-    triggers: [...dataTriggers, ...resolvedTriggers],
+    triggers: [...dataTriggers, ...resolvedTriggers, ...specialTriggers],
     modifiers: createResolvedModifiers(input.resolvedModifiers),
+  }
+}
+
+const SEAL_ADJACENT_OFFSETS = [
+  [-1, 0],
+  [0, -1],
+  [0, 1],
+  [1, 0],
+] as const
+
+function occupiesCell(item: PlayerItemState, row: number, column: number): boolean {
+  return getOccupiedCells(item).some((cell) => cell.row === row && cell.column === column)
+}
+
+function resolveSealAdjacent(playerItems: PlayerItemState[]): void {
+  const sources = playerItems
+    .filter((item) => getItemDefinition(item.itemId).special === 'sealAdjacent')
+    .sort(compareGridOrder)
+
+  for (const source of sources) {
+    if (source.sealed) {
+      continue
+    }
+
+    for (const [rowOffset, columnOffset] of SEAL_ADJACENT_OFFSETS) {
+      const target = playerItems
+        .filter(
+          (candidate) =>
+            candidate.instanceId !== source.instanceId &&
+            !candidate.sealed &&
+            occupiesCell(
+              candidate,
+              source.position.row + rowOffset,
+              source.position.column + columnOffset,
+            ),
+        )
+        .sort(compareGridOrder)[0]
+
+      if (target !== undefined) {
+        target.sealed = true
+        break
+      }
+    }
+  }
+}
+
+function compareDuplicateCandidate(left: PlayerItemState, right: PlayerItemState): number {
+  const rarityDifference =
+    RARITY_RANK[getItemDefinition(right.itemId).rarity] -
+    RARITY_RANK[getItemDefinition(left.itemId).rarity]
+
+  return rarityDifference || compareGridOrder(left, right)
+}
+
+function createVirtualDuplicate(
+  source: PlayerItemState,
+  target: PlayerItemState,
+): PlayerItemState {
+  return {
+    ...target,
+    instanceId: `${source.instanceId}:duplicate:${target.instanceId}`,
+    position: { ...target.position },
+    size: [target.size[0], target.size[1]],
+    virtual: true,
+    duplicateOfInstanceId: target.instanceId,
+    duplicatedByInstanceId: source.instanceId,
+    triggers: target.triggers.map((trigger) => ({ ...trigger })),
+    modifiers: { ...target.modifiers },
+  }
+}
+
+function resolveDuplicateAdjacent(playerItems: PlayerItemState[]): void {
+  const sources = playerItems
+    .filter(
+      (item) => !item.virtual && getItemDefinition(item.itemId).special === 'duplicateAdjacent',
+    )
+    .sort(compareGridOrder)
+
+  for (const source of sources) {
+    if (source.sealed) {
+      continue
+    }
+
+    const target = playerItems
+      .filter(
+        (candidate) =>
+          !candidate.virtual &&
+          !candidate.sealed &&
+          candidate.instanceId !== source.instanceId &&
+          areItemsAdjacent(source, candidate),
+      )
+      .sort(compareDuplicateCandidate)[0]
+
+    if (target !== undefined) {
+      playerItems.push(createVirtualDuplicate(source, target))
+    }
   }
 }
 
@@ -556,6 +728,10 @@ function getGlobalPassiveTotal(player: PlayerCombatState, type: Passive['type'])
   return normalizeNumber(total)
 }
 
+export function getPlayerDropLuck(state: CombatState): number {
+  return getGlobalPassiveTotal(state.player, 'dropLuck')
+}
+
 function getSourcePassiveTotal(item: PlayerItemState, type: Passive['type']): number {
   return normalizeNumber(
     item.passives
@@ -673,7 +849,14 @@ export function createCombatState(setup: CombatSetup): CombatState {
   )
 
   const initialEnemy = getInitialEnemy(setup.enemyId)
-  const enemyMaxHp = requireFiniteNonNegative(setup.enemy?.hp ?? initialEnemy.hp, 'enemy.hp')
+  const enemyMaxHp = requireFiniteNonNegative(
+    setup.enemy?.maxHp ?? setup.enemy?.hp ?? initialEnemy.hp,
+    'enemy.maxHp',
+  )
+  const enemyHp = Math.min(
+    requireFiniteNonNegative(setup.enemy?.hp ?? enemyMaxHp, 'enemy.hp'),
+    enemyMaxHp,
+  )
   const enemyBlockCap = requireFiniteNonNegative(
     setup.enemy?.blockCap ?? Number.MAX_SAFE_INTEGER,
     'enemy.blockCap',
@@ -683,6 +866,8 @@ export function createCombatState(setup: CombatSetup): CombatState {
   )
 
   const playerItems = playerItemEntries.map((entry) => entry.state)
+  resolveSealAdjacent(playerItems)
+  resolveDuplicateAdjacent(playerItems)
   applyAdjacencySnapshot(playerItems)
 
   const state: CombatState = {
@@ -716,7 +901,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
     },
     enemy: {
       id: setup.enemyId,
-      hp: enemyMaxHp,
+      hp: enemyHp,
       maxHp: enemyMaxHp,
       block: Math.min(
         requireFiniteNonNegative(setup.enemy?.block ?? 0, 'enemy.block'),
@@ -724,6 +909,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
       ),
       blockCap: enemyBlockCap,
       phaseIndex: initialEnemy.phaseIndex,
+      tags: initialEnemy.tags,
       statuses: createStatusState(setup.enemy?.statuses),
       abilities: initialEnemy.abilities.map((ability, index) => ({
         index,
@@ -739,9 +925,9 @@ export function createCombatState(setup: CombatSetup): CombatState {
     },
   }
 
-  for (const entry of playerItemEntries) {
-    if (entry.input.initialCooldown === undefined && entry.state.baseCooldown !== null) {
-      entry.state.cooldown = calculatePlayerItemCooldown(state, entry.state)
+  for (const item of state.player.items) {
+    if (item.usesDefaultInitialCooldown && item.baseCooldown !== null) {
+      item.cooldown = calculatePlayerItemCooldown(state, item)
     }
   }
 
@@ -816,11 +1002,26 @@ function getSideState(state: CombatState, side: CombatSide): PlayerCombatState |
 }
 
 function compareGridOrder(left: PlayerItemState, right: PlayerItemState): number {
-  return (
-    left.position.row - right.position.row ||
-    left.position.column - right.position.column ||
-    left.instanceId.localeCompare(right.instanceId)
-  )
+  const positionDifference =
+    left.position.row - right.position.row || left.position.column - right.position.column
+
+  if (positionDifference !== 0) {
+    return positionDifference
+  }
+
+  if (left.duplicateOfInstanceId === right.instanceId) {
+    return 1
+  }
+
+  if (right.duplicateOfInstanceId === left.instanceId) {
+    return -1
+  }
+
+  if (left.virtual !== right.virtual) {
+    return left.virtual ? 1 : -1
+  }
+
+  return left.instanceId.localeCompare(right.instanceId)
 }
 
 function getAllTriggerSources(
@@ -838,15 +1039,22 @@ function getAllTriggerSources(
 
   return [...state.player.items]
     .sort(compareGridOrder)
-    .flatMap((item) =>
-      item.sealed
-        ? []
-        : item.triggers.flatMap((effect, triggerIndex) =>
-            effect.trigger === trigger
-              ? [{ side, sourceId: item.instanceId, triggerIndex, effect }]
-              : [],
-          ),
-    )
+    .flatMap((item) => getItemTriggerSources(item, trigger))
+}
+
+function getItemTriggerSources(
+  item: PlayerItemState,
+  trigger: CombatTriggerName,
+): TriggerSource[] {
+  if (item.sealed) {
+    return []
+  }
+
+  return item.triggers.flatMap((effect, triggerIndex) =>
+    effect.trigger === trigger
+      ? [{ side: 'player', sourceId: item.instanceId, triggerIndex, effect }]
+      : [],
+  )
 }
 
 function getOnHitTriggerSources(
@@ -864,11 +1072,7 @@ function getOnHitTriggerSources(
     return []
   }
 
-  return item.triggers.flatMap((effect, triggerIndex) =>
-    effect.trigger === 'onHit'
-      ? [{ side, sourceId: item.instanceId, triggerIndex, effect }]
-      : [],
-  )
+  return getItemTriggerSources(item, 'onHit')
 }
 
 function takeRandom(state: CombatState): number {
@@ -980,6 +1184,17 @@ function executeTriggerEffect(
   const owner = getSideState(state, source.side)
   const opponentSide = oppositeSide(source.side)
   const opponent = getSideState(state, opponentSide)
+
+  if (source.effect.type === 'maxHp') {
+    owner.maxHp = normalizeNumber(Math.max(0, owner.maxHp + source.effect.value))
+    owner.hp = Math.min(owner.hp, owner.maxHp)
+    return
+  }
+
+  if (source.effect.type === 'healPercent') {
+    applyHeal(owner, owner.maxHp * (source.effect.value / 100))
+    return
+  }
 
   if (source.effect.type === 'heal') {
     applyHeal(owner, source.effect.value)
@@ -1215,6 +1430,20 @@ function resolveIntegerSecondStatusDamage(
   resolveStatusDamageForSide(state, 'enemy', damages, triggerEvents)
 }
 
+function resolveItemBattleStartSpecial(state: CombatState, item: PlayerItemState): void {
+  const special = getItemDefinition(item.itemId).special
+
+  if (special === 'openingShot' && item.baseCooldown !== null) {
+    item.cooldown = 0
+  } else if (special === 'readyAllCooldowns') {
+    for (const candidate of state.player.items) {
+      if (candidate.baseCooldown !== null) {
+        candidate.cooldown = 0
+      }
+    }
+  }
+}
+
 function resolveBattleStart(
   state: CombatState,
   damages: CombatDamage[],
@@ -1225,14 +1454,22 @@ function resolveBattleStart(
   }
 
   state.battleStarted = true
-  // Sealing must already be resolved before this point. Sealed items are excluded by source lookup.
-  resolveTriggerSources(
-    state,
-    getAllTriggerSources(state, 'player', 'battleStart'),
-    {},
-    damages,
-    triggerEvents,
-  )
+  // Structural sealing/duplication and adjacency snapshots are finalized during state creation.
+  for (const item of [...state.player.items].sort(compareGridOrder)) {
+    if (item.sealed || state.result !== 'ongoing') {
+      continue
+    }
+
+    resolveItemBattleStartSpecial(state, item)
+    resolveTriggerSources(
+      state,
+      getItemTriggerSources(item, 'battleStart'),
+      {},
+      damages,
+      triggerEvents,
+    )
+  }
+
   resolveTriggerSources(
     state,
     getAllTriggerSources(state, 'enemy', 'battleStart'),
@@ -1240,6 +1477,50 @@ function resolveBattleStart(
     damages,
     triggerEvents,
   )
+}
+
+function getItemSpecialDamageMultiplier(state: CombatState, item: PlayerItemState): number {
+  const definition = getItemDefinition(item.itemId)
+
+  if (
+    definition.special === 'execute' &&
+    state.enemy.hp <= state.enemy.maxHp * 0.5
+  ) {
+    return requireSpecialValue(definition)
+  }
+
+  if (definition.special === 'undeadSlayer' && state.enemy.tags.includes('undead')) {
+    return requireSpecialValue(definition)
+  }
+
+  return 1
+}
+
+function getItemSpecialFlatDamage(state: CombatState, item: PlayerItemState): number {
+  const definition = getItemDefinition(item.itemId)
+  let bonus = 0
+
+  if (definition.special === 'battleScalingDamage') {
+    bonus += item.battleDamageBonus
+  } else if (definition.special === 'runScalingDamage') {
+    bonus += item.runDamageBonus
+  } else if (definition.special === 'poisonFinisher') {
+    bonus += state.enemy.statuses.poisonStacks * requireSpecialValue(definition)
+  }
+
+  return normalizeNumber(bonus)
+}
+
+function advanceItemDamageScaling(item: PlayerItemState): void {
+  const definition = getItemDefinition(item.itemId)
+
+  if (definition.special === 'battleScalingDamage') {
+    item.battleDamageBonus = normalizeNumber(
+      item.battleDamageBonus + requireSpecialValue(definition),
+    )
+  } else if (definition.special === 'runScalingDamage') {
+    item.runDamageBonus = normalizeNumber(item.runDamageBonus + requireSpecialValue(definition))
+  }
 }
 
 function resolvePlayerEffects(
@@ -1254,7 +1535,7 @@ function resolvePlayerEffects(
     if (effect.type === 'damage' && effect.value !== undefined) {
       const calculation = calculateDamage({
         base: effect.value * effectMultiplier,
-        flatBonuses: [source.modifiers.flatDamage],
+        flatBonuses: [source.modifiers.flatDamage, getItemSpecialFlatDamage(state, source)],
         damageMultipliers: [
           getGlobalPassiveTotal(state.player, 'damageMult'),
           source.modifiers.damageMultiplier,
@@ -1265,7 +1546,8 @@ function resolvePlayerEffects(
           getSourcePassiveTotal(source, 'critChance') +
           source.modifiers.critChancePercent,
         critMultiplier: getSourceCritMultiplier(source),
-        specialMultiplier: source.modifiers.specialMultiplier,
+        specialMultiplier:
+          source.modifiers.specialMultiplier * getItemSpecialDamageMultiplier(state, source),
         damageReduction: 0,
         randomValue: takeRandom(state),
       })
@@ -1283,6 +1565,7 @@ function resolvePlayerEffects(
         damages,
         triggerEvents,
       )
+      advanceItemDamageScaling(source)
     } else if (effect.type === 'block' && effect.value !== undefined) {
       applyBlock(state.player, effect.value * effectMultiplier + source.modifiers.blockFlat)
     } else if (effect.type === 'heal' && effect.value !== undefined) {
