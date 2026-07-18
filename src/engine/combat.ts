@@ -45,6 +45,7 @@ const RARITY_RANK: Readonly<Record<Rarity, number>> = {
 
 export type CombatResult = 'ongoing' | 'playerVictory' | 'playerDefeat'
 export type CombatSide = 'player' | 'enemy'
+export type CombatDamageKind = 'normal' | 'status' | 'reflect' | 'sudden'
 export type CombatTriggerName = TriggerEffect['trigger']
 export type CombatTriggerEffectType = TriggerEffect['type'] | 'maxHp' | 'healPercent'
 
@@ -198,9 +199,28 @@ export interface CombatState {
   terminalTriggersResolved: boolean
   consumedTriggerKeys: string[]
   goldGained: number
+  events: CombatEvent[]
   player: PlayerCombatState
   enemy: EnemyCombatState
 }
+
+export type CombatEvent =
+  | { t: number; type: 'activate'; side: CombatSide; sourceId: string }
+  | {
+      t: number
+      type: 'damage'
+      side: CombatSide
+      amount: number
+      crit: boolean
+      blocked: number
+      kind: CombatDamageKind
+    }
+  | { t: number; type: 'heal'; side: CombatSide; amount: number; sourceId: string }
+  | { t: number; type: 'block'; side: CombatSide; amount: number; sourceId: string }
+  | { t: number; type: 'gold'; side: CombatSide; amount: number; sourceId: string }
+  | { t: number; type: 'status'; side: CombatSide; status: StatusKind; value: number }
+  | { t: number; type: 'seal'; itemId: string }
+  | { t: number; type: 'phase' | 'revive' | 'flee' | 'end'; detail: string }
 
 export interface CombatActivation {
   side: CombatSide
@@ -235,6 +255,7 @@ export interface TickResult {
   activations: CombatActivation[]
   damages: CombatDamage[]
   triggerEvents: CombatTriggerEvent[]
+  events: CombatEvent[]
 }
 
 export interface DamageCalculationInput {
@@ -251,6 +272,27 @@ export interface DamageCalculationInput {
 export interface DamageCalculation {
   amount: number
   critical: boolean
+}
+
+export interface CombatStats {
+  durationSeconds: number
+  ticks: number
+  playerDamageDealt: number
+  enemyDamageDealt: number
+  playerHealing: number
+  enemyHealing: number
+  blockGained: number
+  goldGained: number
+  playerActivations: number
+  enemyActivations: number
+  playerHpRemaining: number
+  enemyHpRemaining: number
+}
+
+export interface SimulationResult {
+  result: Exclude<CombatResult, 'ongoing'>
+  events: readonly CombatEvent[]
+  stats: CombatStats
 }
 
 interface TriggerSource {
@@ -936,6 +978,12 @@ export function createCombatState(setup: CombatSetup): CombatState {
   battleRngState = resolveRandomEnemySeals(playerItems, initialEnemy.traits, battleRngState)
   resolveDuplicateAdjacent(playerItems)
   applyAdjacencySnapshot(playerItems)
+  const initialEvents: CombatEvent[] = playerItems.flatMap((item) => {
+    const input = playerItemEntries.find((entry) => entry.state.instanceId === item.instanceId)?.input
+    return item.sealed && input?.sealed !== true
+      ? [{ t: 0, type: 'seal' as const, itemId: item.instanceId }]
+      : []
+  })
 
   const baseStaminaRegenPerSecond = requireFiniteNonNegative(
     setup.player?.staminaRegenPerSecond ?? gameConfig.player.staminaRegenPerSecond,
@@ -951,6 +999,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
     terminalTriggersResolved: false,
     consumedTriggerKeys: [],
     goldGained: 0,
+    events: initialEvents,
     player: {
       hp: playerHp,
       maxHp: playerMaxHp,
@@ -1021,6 +1070,7 @@ function cloneCombatState(state: CombatState): CombatState {
   return {
     ...state,
     consumedTriggerKeys: [...state.consumedTriggerKeys],
+    events: [...state.events],
     player: {
       ...state.player,
       statuses: cloneStatusState(state.player.statuses),
@@ -1078,6 +1128,72 @@ function applyDamage(
   target.hp = normalizeNumber(target.hp - hpDamage)
 
   return { blocked: normalizeNumber(blocked), hpDamage }
+}
+
+function recordDamage(state: CombatState, damage: CombatDamage, kind: CombatDamageKind): void {
+  state.events.push({
+    t: state.time,
+    type: 'damage',
+    side: damage.targetSide,
+    amount: damage.amount,
+    crit: damage.critical,
+    blocked: damage.blocked,
+    kind,
+  })
+}
+
+function applyRecordedHeal(
+  state: CombatState,
+  side: CombatSide,
+  amount: number,
+  sourceId: string,
+): void {
+  const target = getSideState(state, side)
+  const before = target.hp
+  applyHeal(target, amount)
+  const applied = normalizeNumber(target.hp - before)
+  if (applied > 0) {
+    state.events.push({ t: state.time, type: 'heal', side, amount: applied, sourceId })
+  }
+}
+
+function applyRecordedBlock(
+  state: CombatState,
+  side: CombatSide,
+  amount: number,
+  sourceId: string,
+): void {
+  const target = getSideState(state, side)
+  const before = target.block
+  applyBlock(target, amount)
+  const applied = normalizeNumber(target.block - before)
+  if (applied > 0) {
+    state.events.push({ t: state.time, type: 'block', side, amount: applied, sourceId })
+  }
+}
+
+function applyRecordedStatus(
+  state: CombatState,
+  side: CombatSide,
+  status: StatusKind,
+  value: number,
+): void {
+  applyStatus(getSideState(state, side).statuses, status, value)
+  if (value > 0) {
+    state.events.push({ t: state.time, type: 'status', side, status, value })
+  }
+}
+
+function recordGold(state: CombatState, amount: number, sourceId: string): void {
+  if (amount !== 0) {
+    state.events.push({
+      t: state.time,
+      type: 'gold',
+      side: 'player',
+      amount: normalizeNumber(amount),
+      sourceId,
+    })
+  }
 }
 
 function getSideState(state: CombatState, side: CombatSide): PlayerCombatState | EnemyCombatState {
@@ -1241,6 +1357,15 @@ function resolveTerminalTriggers(
     damages,
     triggerEvents,
   )
+
+  if (winnerSide === 'player' && !state.enemy.fled) {
+    resolveBanditKillGold(state)
+    const reward = enemyById.get(state.enemy.id)?.gold ?? 0
+    state.player.gold = normalizeNumber(state.player.gold + reward)
+    state.goldGained = normalizeNumber(state.goldGained + reward)
+    recordGold(state, reward, state.enemy.id)
+  }
+  state.events.push({ t: state.time, type: 'end', detail: state.result })
 }
 
 function updatePlayerStaminaRegenForEnemyTraits(state: CombatState): void {
@@ -1278,6 +1403,11 @@ function transitionEnemyPhase(state: CombatState): boolean {
     effects: ability.effects,
   }))
   updatePlayerStaminaRegenForEnemyTraits(state)
+  state.events.push({
+    t: state.time,
+    type: 'phase',
+    detail: `${state.enemy.id}:${nextPhaseIndex}`,
+  })
   return true
 }
 
@@ -1289,6 +1419,9 @@ function reviveEnemy(state: CombatState): boolean {
 
   state.enemy.reviveUsed = true
   state.enemy.hp = normalizeNumber(Math.min(state.enemy.maxHp, Math.max(0, revive.value)))
+  if (state.enemy.hp > 0) {
+    state.events.push({ t: state.time, type: 'revive', detail: state.enemy.id })
+  }
   return state.enemy.hp > 0
 }
 
@@ -1314,6 +1447,7 @@ function resolveBanditKillGold(state: CombatState): void {
   const recovered = normalizeNumber(state.enemy.stolenGold + (flee.killBonus ?? 0))
   state.player.gold = normalizeNumber(state.player.gold + recovered)
   state.goldGained = normalizeNumber(state.goldGained + recovered)
+  recordGold(state, recovered, `${state.enemy.id}:recovered`)
   state.enemy.stolenGold = 0
 }
 
@@ -1327,7 +1461,6 @@ function updateResultAndResolveTerminal(
       return
     }
 
-    resolveBanditKillGold(state)
     state.result = 'playerVictory'
     resolveTerminalTriggers(state, 'player', damages, triggerEvents)
   } else if (state.player.hp <= 0) {
@@ -1345,7 +1478,6 @@ function executeTriggerEffect(
 ): void {
   const owner = getSideState(state, source.side)
   const opponentSide = oppositeSide(source.side)
-  const opponent = getSideState(state, opponentSide)
 
   if (source.effect.type === 'maxHp') {
     owner.maxHp = normalizeNumber(Math.max(0, owner.maxHp + source.effect.value))
@@ -1354,17 +1486,17 @@ function executeTriggerEffect(
   }
 
   if (source.effect.type === 'healPercent') {
-    applyHeal(owner, owner.maxHp * (source.effect.value / 100))
+    applyRecordedHeal(state, source.side, owner.maxHp * (source.effect.value / 100), source.sourceId)
     return
   }
 
   if (source.effect.type === 'heal') {
-    applyHeal(owner, source.effect.value)
+    applyRecordedHeal(state, source.side, source.effect.value, source.sourceId)
     return
   }
 
   if (source.effect.type === 'block') {
-    applyBlock(owner, source.effect.value)
+    applyRecordedBlock(state, source.side, source.effect.value, source.sourceId)
     return
   }
 
@@ -1372,13 +1504,14 @@ function executeTriggerEffect(
     if (source.side === 'player') {
       state.goldGained = normalizeNumber(state.goldGained + source.effect.value)
       state.player.gold = normalizeNumber(state.player.gold + source.effect.value)
+      recordGold(state, source.effect.value, source.sourceId)
     }
     return
   }
 
   if (source.effect.type === 'applyStatus') {
     if (source.effect.status !== undefined) {
-      applyStatus(opponent.statuses, source.effect.status, source.effect.value)
+      applyRecordedStatus(state, opponentSide, source.effect.status, source.effect.value)
     }
     return
   }
@@ -1391,7 +1524,7 @@ function executeTriggerEffect(
   const amount = Math.max(0, source.effect.value)
   const applied = applyDamage(target, amount, false)
 
-  pushTriggeredDamage(damages, {
+  const triggeredDamage = pushTriggeredDamage(damages, {
     sourceSide: source.side,
     targetSide,
     sourceId: source.sourceId,
@@ -1401,6 +1534,11 @@ function executeTriggerEffect(
     hpDamage: applied.hpDamage,
     pierce: false,
   })
+  recordDamage(
+    state,
+    triggeredDamage,
+    source.effect.type === 'reflect' ? 'reflect' : 'normal',
+  )
   updateResultAndResolveTerminal(state, damages, triggerEvents)
 }
 
@@ -1453,14 +1591,12 @@ function applyDirectDamage(
     blocked: applied.blocked,
     hpDamage: applied.hpDamage,
   })
+  recordDamage(state, damage, 'normal')
 
   const enemyDeathPrevented =
     input.targetSide === 'enemy' && afterHp <= 0 && resolveEnemyDeathProtection(state)
 
   if (afterHp <= 0 && !enemyDeathPrevented) {
-    if (input.targetSide === 'enemy') {
-      resolveBanditKillGold(state)
-    }
     state.result = input.targetSide === 'enemy' ? 'playerVictory' : 'playerDefeat'
   }
 
@@ -1499,7 +1635,7 @@ function applyDirectDamage(
     const thorns = getEnemyTrait(state.enemy.traits, 'thorns')
     if (thorns !== undefined && damage.amount > 0) {
       const reflected = applyDamage(state.player, Math.max(0, thorns.value), false)
-      pushTriggeredDamage(damages, {
+      const thornsDamage = pushTriggeredDamage(damages, {
         sourceSide: 'enemy',
         targetSide: 'player',
         sourceId: `${state.enemy.id}:trait:thorns`,
@@ -1509,6 +1645,7 @@ function applyDirectDamage(
         hpDamage: reflected.hpDamage,
         pierce: false,
       })
+      recordDamage(state, thornsDamage, 'reflect')
       updateResultAndResolveTerminal(state, damages, triggerEvents)
     }
   }
@@ -1560,7 +1697,7 @@ function applyTrueStatusDamage(
   const applied = applyDamage(target, amount, true)
   const afterHp = target.hp
 
-  damages.push({
+  const damage: CombatDamage = {
     sourceSide: oppositeSide(targetSide),
     targetSide,
     sourceId: `status:${status}`,
@@ -1572,7 +1709,9 @@ function applyTrueStatusDamage(
     trueDamage: true,
     triggersAllowed: false,
     status,
-  })
+  }
+  damages.push(damage)
+  recordDamage(state, damage, 'status')
 
   if (afterHp <= 0) {
     updateResultAndResolveTerminal(state, damages, triggerEvents)
@@ -1633,7 +1772,7 @@ function applySuddenDeathDamage(
   const target = getSideState(state, targetSide)
   const applied = applyDamage(target, amount, true)
 
-  damages.push({
+  const damage: CombatDamage = {
     sourceSide: oppositeSide(targetSide),
     targetSide,
     sourceId: 'suddenDeath',
@@ -1644,7 +1783,9 @@ function applySuddenDeathDamage(
     pierce: true,
     trueDamage: true,
     triggersAllowed: false,
-  })
+  }
+  damages.push(damage)
+  recordDamage(state, damage, 'sudden')
   updateResultAndResolveTerminal(state, damages, triggerEvents)
 }
 
@@ -1675,9 +1816,14 @@ function resolveIntegerSecondEnemyTraits(state: CombatState): void {
 
   for (const trait of state.enemy.traits) {
     if (trait.type === 'hpRegen') {
-      applyHeal(state.enemy, Math.max(0, trait.value))
+      applyRecordedHeal(state, 'enemy', Math.max(0, trait.value), `${state.enemy.id}:hpRegen`)
     } else if (trait.type === 'blockRegen') {
-      applyBlock(state.enemy, Math.max(0, trait.value))
+      applyRecordedBlock(
+        state,
+        'enemy',
+        Math.max(0, trait.value),
+        `${state.enemy.id}:blockRegen`,
+      )
     } else if (trait.type === 'enrage' && trait.interval !== undefined) {
       const intervalTicks = Math.round(trait.interval / TICK_SECONDS)
       if (intervalTicks > 0 && state.tick % intervalTicks === 0) {
@@ -1805,13 +1951,19 @@ function resolveEnemyLifesteal(state: CombatState, hpDamage: number): void {
     return
   }
 
-  applyHeal(state.enemy, hpDamage * Math.max(0, lifesteal.value))
+  applyRecordedHeal(
+    state,
+    'enemy',
+    hpDamage * Math.max(0, lifesteal.value),
+    `${state.enemy.id}:lifesteal`,
+  )
 }
 
 function resolveEnemyGoldSteal(state: CombatState, amount: number): void {
   const stolen = normalizeNumber(Math.min(state.player.gold, Math.max(0, amount)))
   state.player.gold = normalizeNumber(state.player.gold - stolen)
   state.enemy.stolenGold = normalizeNumber(state.enemy.stolenGold + stolen)
+  recordGold(state, -stolen, `${state.enemy.id}:steal`)
 }
 
 function resolveEnemyFlee(
@@ -1826,6 +1978,7 @@ function resolveEnemyFlee(
 
   state.enemy.fled = true
   state.result = 'playerVictory'
+  state.events.push({ t: state.time, type: 'flee', detail: state.enemy.id })
   state.terminalTriggersResolved = true
   resolveTriggerSources(
     state,
@@ -1834,6 +1987,7 @@ function resolveEnemyFlee(
     damages,
     triggerEvents,
   )
+  state.events.push({ t: state.time, type: 'end', detail: state.result })
 }
 
 function resolvePlayerEffects(
@@ -1880,15 +2034,20 @@ function resolvePlayerEffects(
       )
       advanceItemDamageScaling(source)
     } else if (effect.type === 'block' && effect.value !== undefined) {
-      applyBlock(state.player, effect.value * effectMultiplier + source.modifiers.blockFlat)
+      applyRecordedBlock(
+        state,
+        'player',
+        effect.value * effectMultiplier + source.modifiers.blockFlat,
+        source.instanceId,
+      )
     } else if (effect.type === 'heal' && effect.value !== undefined) {
-      applyHeal(state.player, effect.value * effectMultiplier)
+      applyRecordedHeal(state, 'player', effect.value * effectMultiplier, source.instanceId)
     } else if (
       effect.type === 'applyStatus' &&
       effect.status !== undefined &&
       effect.value !== undefined
     ) {
-      applyStatus(state.enemy.statuses, effect.status, effect.value * effectMultiplier)
+      applyRecordedStatus(state, 'enemy', effect.status, effect.value * effectMultiplier)
     } else if (effect.type === 'cleanseSelf') {
       cleansePoisonAndBurn(state.player.statuses)
     }
@@ -1945,7 +2104,7 @@ function resolveEnemyEffects(
       effect.status !== undefined &&
       effect.value !== undefined
     ) {
-      applyStatus(state.player.statuses, effect.status, effect.value)
+      applyRecordedStatus(state, 'player', effect.status, effect.value)
     }
 
     if (state.result !== 'ongoing') {
@@ -1981,6 +2140,12 @@ function activatePlayerItems(
     state.player.stamina = normalizeNumber(state.player.stamina - item.staminaCost)
     item.cooldown = calculatePlayerItemCooldown(state, item)
     activations.push({ side: 'player', sourceId: item.instanceId })
+    state.events.push({
+      t: state.time,
+      type: 'activate',
+      side: 'player',
+      sourceId: item.instanceId,
+    })
     resolvePlayerEffects(state, item, damages, triggerEvents)
   }
 }
@@ -2005,23 +2170,37 @@ function activateEnemyAbilities(
       side: 'enemy',
       sourceId: `${state.enemy.id}:ability:${ability.index}`,
     })
+    state.events.push({
+      t: state.time,
+      type: 'activate',
+      side: 'enemy',
+      sourceId: `${state.enemy.id}:ability:${ability.index}`,
+    })
     resolveEnemyEffects(state, ability, damages, triggerEvents)
   }
 }
 
 export function stepCombat(state: CombatState): TickResult {
   if (state.result !== 'ongoing') {
-    return { state, activations: [], damages: [], triggerEvents: [] }
+    return { state, activations: [], damages: [], triggerEvents: [], events: [] }
   }
 
   const nextState = cloneCombatState(state)
+  const previousEventCount = nextState.events.length
   const activations: CombatActivation[] = []
   const damages: CombatDamage[] = []
   const triggerEvents: CombatTriggerEvent[] = []
+  const result = (): TickResult => ({
+    state: nextState,
+    activations,
+    damages,
+    triggerEvents,
+    events: nextState.events.slice(previousEventCount),
+  })
 
   resolveBattleStart(nextState, damages, triggerEvents)
   if (nextState.result !== 'ongoing') {
-    return { state: nextState, activations, damages, triggerEvents }
+    return result()
   }
 
   // §3.1: advance the integer tick first; derive time to avoid accumulated drift.
@@ -2031,13 +2210,13 @@ export function stepCombat(state: CombatState): TickResult {
   // §3.2: status True damage at integer seconds, Player then Enemy.
   resolveIntegerSecondStatusDamage(nextState, damages, triggerEvents)
   if (nextState.result !== 'ongoing') {
-    return { state: nextState, activations, damages, triggerEvents }
+    return result()
   }
 
   // §3.3: escalating True damage at integer seconds from t=60 onward.
   resolveSuddenDeath(nextState, damages, triggerEvents)
   if (nextState.result !== 'ongoing') {
-    return { state: nextState, activations, damages, triggerEvents }
+    return result()
   }
 
   // Integer-second traits resolve after the explicitly ordered damage stages.
@@ -2076,7 +2255,7 @@ export function stepCombat(state: CombatState): TickResult {
   activatePlayerItems(nextState, activations, damages, triggerEvents)
   activateEnemyAbilities(nextState, activations, damages, triggerEvents)
 
-  return { state: nextState, activations, damages, triggerEvents }
+  return result()
 }
 
 export function runTicks(initialState: CombatState, count: number): CombatState {
@@ -2091,4 +2270,65 @@ export function runTicks(initialState: CombatState, count: number): CombatState 
   }
 
   return state
+}
+
+export function simulate(
+  build: readonly BuildItemInput[],
+  enemyId: string,
+  seed: Seed,
+): SimulationResult {
+  let state = createCombatState({ build, enemyId, seed })
+
+  while (state.result === 'ongoing') {
+    state = stepCombat(state).state
+  }
+
+  const damageEvents = state.events.filter(
+    (event): event is Extract<CombatEvent, { type: 'damage' }> => event.type === 'damage',
+  )
+  const healingEvents = state.events.filter(
+    (event): event is Extract<CombatEvent, { type: 'heal' }> => event.type === 'heal',
+  )
+  const activationEvents = state.events.filter(
+    (event): event is Extract<CombatEvent, { type: 'activate' }> => event.type === 'activate',
+  )
+
+  return {
+    result: state.result,
+    events: [...state.events],
+    stats: {
+      durationSeconds: state.time,
+      ticks: state.tick,
+      playerDamageDealt: normalizeNumber(
+        damageEvents
+          .filter((event) => event.side === 'enemy')
+          .reduce((total, event) => total + event.amount - event.blocked, 0),
+      ),
+      enemyDamageDealt: normalizeNumber(
+        damageEvents
+          .filter((event) => event.side === 'player')
+          .reduce((total, event) => total + event.amount - event.blocked, 0),
+      ),
+      playerHealing: normalizeNumber(
+        healingEvents
+          .filter((event) => event.side === 'player')
+          .reduce((total, event) => total + event.amount, 0),
+      ),
+      enemyHealing: normalizeNumber(
+        healingEvents
+          .filter((event) => event.side === 'enemy')
+          .reduce((total, event) => total + event.amount, 0),
+      ),
+      blockGained: normalizeNumber(
+        state.events
+          .filter((event): event is Extract<CombatEvent, { type: 'block' }> => event.type === 'block')
+          .reduce((total, event) => total + event.amount, 0),
+      ),
+      goldGained: state.goldGained,
+      playerActivations: activationEvents.filter((event) => event.side === 'player').length,
+      enemyActivations: activationEvents.filter((event) => event.side === 'enemy').length,
+      playerHpRemaining: Math.max(0, state.player.hp),
+      enemyHpRemaining: Math.max(0, state.enemy.hp),
+    },
+  }
 }

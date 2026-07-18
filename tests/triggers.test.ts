@@ -184,7 +184,7 @@ describe('combat triggers', () => {
 
     expect(tick.state.result).toBe('playerVictory')
     expect(tick.state.player.hp).toBe(93)
-    expect(tick.state.goldGained).toBe(3)
+    expect(tick.state.goldGained).toBe(13)
     expect(tick.triggerEvents.map((event) => event.trigger)).toEqual(['onKill', 'battleWin'])
   })
 })

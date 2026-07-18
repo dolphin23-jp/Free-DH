@@ -118,8 +118,8 @@ describe('enemy traits', () => {
     state = stepCombat(state).state
 
     expect(state.result).toBe('playerVictory')
-    expect(state.player.gold).toBe(28)
-    expect(state.goldGained).toBe(16)
+    expect(state.player.gold).toBe(40)
+    expect(state.goldGained).toBe(28)
     expect(state.enemy.stolenGold).toBe(0)
   })
 
