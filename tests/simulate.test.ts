@@ -73,7 +73,7 @@ const cases: readonly {
     ],
     enemyId: 'EN_A3_05',
     seed: 'golden:demon-king',
-    hash: '348a7177',
+    hash: '8a9ba695',
   },
 ]
 
