@@ -1,0 +1,91 @@
+{
+  "$comment": "docs/COMBAT_SPEC.md §10 の周回・経済設定値。バランス数値はコードへハードコードせず、このファイルを参照する",
+  "player": {
+    "initialHp": 100,
+    "staminaCap": 10,
+    "staminaRegenPerSecond": 1.0,
+    "blockCap": 30,
+    "baseCritChancePercent": 5,
+    "critMultiplier": 2.0,
+    "minimumCooldownSeconds": 0.3,
+    "maximumCooldownReductionPercent": 60,
+    "initialBag": { "columns": 4, "rows": 3 },
+    "storageSlots": 8,
+    "initialGold": 15
+  },
+  "drops": {
+    "normalSlots": 2,
+    "bossSlots": 3,
+    "eliteBonusSlots": 1,
+    "bagExpansionSequence": [
+      { "columns": 4, "rows": 3 },
+      { "columns": 5, "rows": 3 },
+      { "columns": 5, "rows": 4 },
+      { "columns": 6, "rows": 4 }
+    ],
+    "shopOnlyFinalExpansion": { "columns": 6, "rows": 5, "cost": 30 },
+    "rarityPercentByArea": {
+      "1": { "common": 50, "uncommon": 30, "rare": 14, "epic": 5, "legendary": 1 },
+      "2": { "common": 38, "uncommon": 33, "rare": 19, "epic": 8, "legendary": 2 },
+      "3": { "common": 28, "uncommon": 33, "rare": 24, "epic": 12, "legendary": 3 }
+    },
+    "abyssShiftPercentPerLevel": {
+      "rare": 1.0,
+      "epic": 0.7,
+      "legendary": 0.3
+    },
+    "legendaryPity": {
+      "startsAfterBattles": 30,
+      "increasePercentPerBattle": 1
+    },
+    "affixesPerRarity": {
+      "common": { "minimum": 0, "maximum": 0, "secondAffixChancePercent": 0 },
+      "uncommon": { "minimum": 0, "maximum": 0, "secondAffixChancePercent": 0 },
+      "rare": { "minimum": 1, "maximum": 1, "secondAffixChancePercent": 0 },
+      "epic": { "minimum": 1, "maximum": 2, "secondAffixChancePercent": 50 },
+      "legendary": { "minimum": 2, "maximum": 2, "secondAffixChancePercent": 100 }
+    }
+  },
+  "shop": {
+    "slots": 6,
+    "rerollCosts": [5, 7, 10, 14, 19],
+    "purchasePriceByRarity": {
+      "common": 4,
+      "uncommon": 8,
+      "rare": 15,
+      "epic": 28,
+      "legendary": 50
+    },
+    "sellPriceRate": 0.5,
+    "healService": { "cost": 20, "hp": 20, "usesPerShop": 1 },
+    "cursedChest": {
+      "appearanceChancePercent": 10,
+      "cost": 50,
+      "minimumRarity": "epic",
+      "maxHpPenalty": 10
+    },
+    "gambler": {
+      "appearanceChancePercent": 10,
+      "cost": 30,
+      "rarityPercentEach": 20
+    }
+  },
+  "bossChoice": {
+    "healMaxHpPercent": 40,
+    "additionalDropSlots": 2
+  },
+  "souls": {
+    "abyssMultiplierPerLevel": 0.2,
+    "clearBonus": 10,
+    "unlockCostByRarity": { "rare": 15, "epic": 30, "legendary": 60 },
+    "classUnlockCost": 40
+  },
+  "abyss": {
+    "maximumLevel": 10,
+    "enemyHpMultiplierPerLevel": 0.15,
+    "enemyAttackMultiplierPerLevel": 0.1,
+    "eliteStartsAtLevel": 3,
+    "eliteHpBonusMultiplier": 0.3,
+    "eliteDropBonusSlots": 1
+  }
+}
