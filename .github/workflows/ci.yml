@@ -38,27 +38,5 @@ jobs:
       - name: Simulator smoke test
         run: pnpm sim -- --runs 1
 
-      - name: TypeScript diagnostics
-        id: typecheck
-        shell: bash
-        run: |
-          set +e
-          pnpm exec tsc --noEmit --pretty false 2>&1 | tee tsc-output.txt
-          status=${PIPESTATUS[0]}
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload TypeScript diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tsc-output
-          path: tsc-output.txt
-
-      - name: Fail on TypeScript errors
-        if: steps.typecheck.outputs.status != '0'
-        run: exit 1
-
-      - name: Vite build
-        if: steps.typecheck.outputs.status == '0'
-        run: pnpm vite build
+      - name: Build
+        run: pnpm build
