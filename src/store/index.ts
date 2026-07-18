@@ -1,5 +1,6 @@
 export * from './codex'
 export * from './drop-progress'
+export * from './fusion'
 export * from './run'
 export * from './save'
 export * from './shop'
