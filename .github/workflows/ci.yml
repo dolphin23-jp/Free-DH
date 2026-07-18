@@ -36,7 +36,16 @@ jobs:
         run: pnpm lint
 
       - name: Simulator smoke test
-        run: pnpm sim -- --runs 1
+        run: |
+          set -o pipefail
+          pnpm sim -- --runs 1 2>&1 | tee simulator.log
+
+      - name: Upload simulator log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-log
+          path: simulator.log
 
       - name: Build
         run: pnpm build
