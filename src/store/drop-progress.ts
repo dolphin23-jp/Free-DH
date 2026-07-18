@@ -41,17 +41,18 @@ export interface DropProgressStorage {
   removeItem: (key: string) => void
 }
 
-interface PersistedDropProgressV1 {
-  version: 1
-  legendaryMissBattles: number
-  pendingBatch: DropBatch | null
-}
-
 interface PersistedDropProgressV2 {
   version: 2
   legendaryMissBattles: number
   pendingBatch: DropBatch | null
   reservedBossBonus: ReservedBossBonus | null
+}
+
+interface PersistedCandidate {
+  version?: unknown
+  legendaryMissBattles?: unknown
+  pendingBatch?: unknown
+  reservedBossBonus?: unknown
 }
 
 function createInitialData(): DropProgressData {
@@ -92,7 +93,7 @@ function readPersisted(storage: DropProgressStorage | undefined): DropProgressDa
   try {
     const raw = storage.getItem(DROP_PROGRESS_STORAGE_KEY)
     if (raw === null) return createInitialData()
-    const parsed = JSON.parse(raw) as Partial<PersistedDropProgressV1 & PersistedDropProgressV2>
+    const parsed = JSON.parse(raw) as PersistedCandidate
     if (
       !validPity(parsed.legendaryMissBattles) ||
       (parsed.pendingBatch !== null && parsed.pendingBatch !== undefined && !isDropBatch(parsed.pendingBatch))
