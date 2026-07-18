@@ -8,14 +8,18 @@ import { createCombatReplay } from '../engine/replay'
 import { codexStore, getEnemyPreview } from '../store/codex'
 import { dropProgressStore } from '../store/drop-progress'
 import {
+  RUN_BATTLE_COUNT,
   battleResolutionFromCombatState,
   getCurrentEnemyId,
   runStore,
   selectCurrentCombatSetup,
+  type BossBenefitChoice,
+  type BossExpansionChoice,
 } from '../store/run'
 import { shopStore } from '../store/shop'
 import { BagScreen } from './BagScreen'
 import { BattleView } from './BattleView'
+import { BossRewardScreen } from './BossRewardScreen'
 import { CodexScreen } from './CodexScreen'
 import { DropScreen } from './DropScreen'
 import { ShopScreen } from './ShopScreen'
@@ -79,11 +83,9 @@ export function GameScreen() {
     currentEnemyId === null
       ? null
       : getEnemyPreview(currentEnemyId, codex.discoveredEnemyIds)
-  const expectedDropBattleIndex =
-    state.phase === 'result' ? state.battleIndex : Math.max(0, state.battleIndex - 1)
   const pendingBatch =
     state.runSeed !== null &&
-    dropProgress.pendingBatch?.key === `${String(state.runSeed)}:${expectedDropBattleIndex}`
+    dropProgress.pendingBatch?.key.startsWith(`${String(state.runSeed)}:`) === true
       ? dropProgress.pendingBatch
       : null
 
@@ -91,9 +93,30 @@ export function GameScreen() {
     return (
       <DropScreen
         batch={pendingBatch}
-        onComplete={() => dropProgress.clearPendingBatch(pendingBatch.key)}
+        onComplete={() => {
+          const isBossBonus = pendingBatch.key.endsWith(':bonus')
+          dropProgress.clearPendingBatch(pendingBatch.key)
+          if (isBossBonus) runStore.getState().completeBossBonusDrops()
+        }}
       />
     )
+  }
+
+  if (state.phase === 'bossReward') {
+    const claimBossReward = (
+      expansionChoice: BossExpansionChoice,
+      benefitChoice: BossBenefitChoice,
+    ) => {
+      if (state.runSeed === null) throw new Error('Boss reward requires an active run seed')
+      const baseKey = `${String(state.runSeed)}:${state.battleIndex}`
+      if (benefitChoice === 'additionalDrops') {
+        dropProgress.activateBossBonus(baseKey)
+      } else {
+        dropProgress.discardBossBonus(baseKey)
+      }
+      state.claimBossReward(expansionChoice, benefitChoice)
+    }
+    return <BossRewardScreen onClaim={claimBossReward} />
   }
 
   if (codexOpen && state.phase !== 'battle') {
@@ -127,14 +150,16 @@ export function GameScreen() {
           if (resolution.result === 'playerVictory' && state.runSeed !== null) {
             const enemy = currentEnemyId === null ? undefined : enemyById.get(currentEnemyId)
             if (enemy === undefined) throw new Error('Victory enemy metadata is unavailable')
-            dropProgress.prepareBatch({
+            const request = {
               runSeed: state.runSeed,
               battleIndex: state.battleIndex,
               area: enemy.area as 1 | 2 | 3,
               isBoss: enemy.isBoss,
-              abyssLevel: 0,
+              abyssLevel: state.abyssLevel,
               dropLuckPercent: getDropLuckPercent(state.bag.items.map((item) => item.itemId)),
-            })
+            }
+            if (enemy.isBoss) dropProgress.prepareBossBatch(request)
+            else dropProgress.prepareBatch(request)
           }
           state.completeBattle(resolution)
         }}
@@ -148,10 +173,18 @@ export function GameScreen() {
         <section className={`intro-panel run-result-panel ${state.result?.outcome ?? ''}`}>
           <p className="eyebrow">Expedition result</p>
           <h1>{state.result?.outcome === 'cleared' ? 'CLEAR' : 'DEFEAT'}</h1>
-          <dl className="result-stats">
+          <dl className="result-stats result-stats--run">
+            <div>
+              <dt>Reached</dt>
+              <dd>{state.result?.reachedBattleCount ?? state.battleIndex + 1}/{RUN_BATTLE_COUNT}</dd>
+            </div>
             <div>
               <dt>Wins</dt>
               <dd>{state.result?.battlesWon ?? state.battlesWon}</dd>
+            </div>
+            <div className="result-souls">
+              <dt>Soul fragments</dt>
+              <dd>+{state.result?.earnedSoulFragments ?? 0}</dd>
             </div>
             <div>
               <dt>HP</dt>
@@ -185,7 +218,7 @@ export function GameScreen() {
       runSeed: state.runSeed,
       battleIndex: state.battleIndex,
       area: enemy.area as 1 | 2 | 3,
-      abyssLevel: 0,
+      abyssLevel: state.abyssLevel,
     })
     setShopOpen(true)
   }
