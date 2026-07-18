@@ -1,0 +1,252 @@
+.shop-screen {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.shop-header,
+.shop-toolbar,
+.shop-heal,
+.shop-sell-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.shop-header {
+  align-items: end;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.shop-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.shop-header__actions > strong {
+  color: #f0cf79;
+  font-size: 1.4rem;
+}
+
+.shop-close,
+.shop-toolbar button,
+.shop-offer button,
+.shop-heal button,
+.shop-sell-row button {
+  padding: 0.72rem 0.9rem;
+  border: 1px solid rgb(255 238 190 / 20%);
+  border-radius: 0.65rem;
+  background: linear-gradient(180deg, #765029, #452d17);
+  color: #fff4d6;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.shop-close {
+  background: rgb(255 255 255 / 6%);
+}
+
+.shop-toolbar {
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.9rem;
+  background: rgb(0 0 0 / 18%);
+}
+
+.shop-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.shop-toolbar span {
+  padding: 0.45rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 5%);
+  color: #c8ad7f;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.shop-toolbar button:disabled,
+.shop-offer button:disabled,
+.shop-heal button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.shop-offers {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.shop-offer {
+  --rarity-color: #d8d4cb;
+  display: flex;
+  min-height: 13rem;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--rarity-color);
+  border-radius: 0.9rem;
+  background:
+    radial-gradient(circle at 50% 10%, color-mix(in srgb, var(--rarity-color) 18%, transparent), transparent 50%),
+    linear-gradient(155deg, color-mix(in srgb, var(--rarity-color) 8%, #1c1915), #11100e 70%);
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 25%);
+}
+
+.shop-offer.is-purchased {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.shop-offer__rarity {
+  color: var(--rarity-color);
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.shop-offer h2,
+.shop-offer p {
+  margin: 0;
+}
+
+.shop-offer h2 {
+  font-size: 1rem;
+}
+
+.shop-offer p {
+  color: #aaa397;
+  font-size: 0.72rem;
+}
+
+.shop-offer > strong {
+  margin-top: auto;
+  color: #f0cf79;
+  font-size: 1.1rem;
+}
+
+.shop-services {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.6fr) minmax(0, 1.4fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.shop-heal p:last-child {
+  margin: 0.45rem 0 0;
+  color: #aaa397;
+}
+
+.shop-sell-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.shop-sell-row {
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  background: rgb(0 0 0 / 18%);
+}
+
+.shop-sell-row > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.shop-sell-row span {
+  color: #aaa397;
+  font-size: 0.62rem;
+}
+
+.shop-sell-row button {
+  padding: 0.55rem 0.7rem;
+  background: rgb(255 255 255 / 6%);
+}
+
+.shop-notice {
+  position: sticky;
+  bottom: 0.75rem;
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgb(255 222 155 / 18%);
+  border-radius: 0.8rem;
+  background: rgb(17 16 14 / 92%);
+  color: #e6d2a8;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 40%);
+  backdrop-filter: blur(12px);
+}
+
+.battle-launch__actions {
+  display: flex;
+  gap: 0.55rem;
+}
+
+.battle-launch .shop-launch-button {
+  background: linear-gradient(180deg, #315d59, #1e3c3a);
+}
+
+@media (max-width: 70rem) {
+  .shop-offers {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 48rem) {
+  .shop-header,
+  .shop-toolbar,
+  .shop-heal {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .shop-header__actions {
+    justify-content: space-between;
+  }
+
+  .shop-offers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shop-services {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-launch {
+    align-items: stretch;
+  }
+
+  .battle-launch__actions {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 28rem) {
+  .shop-offers {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-offer {
+    min-height: 10rem;
+  }
+
+  .battle-launch {
+    flex-direction: column;
+  }
+
+  .battle-launch__actions button {
+    flex: 1;
+    min-width: 0;
+  }
+}
