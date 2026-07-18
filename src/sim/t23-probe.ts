@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-import { enemies } from '../data'
+import { enemies, items } from '../data'
 import { simulate, type BuildItemInput } from '../engine/combat'
 import { diagnosticBuilds, getStandardBuildForArea } from './builds'
 
@@ -12,6 +12,7 @@ interface Scenario {
   buildId: string
   runs: number
   mutations?: Record<string, number>
+  itemMutations?: Record<string, Record<string, number>>
 }
 
 interface Metrics {
@@ -58,6 +59,13 @@ function runScenario(scenario: Scenario): Metrics {
   if (!Number.isInteger(scenario.runs) || scenario.runs <= 0) throw new Error('runs must be positive')
   const target = enemy as unknown as Record<string, unknown>
   for (const [path, value] of Object.entries(scenario.mutations ?? {})) setPath(target, path, value)
+  for (const [itemId, mutations] of Object.entries(scenario.itemMutations ?? {})) {
+    const item = items.find((candidate) => candidate.id === itemId)
+    if (item === undefined) throw new Error(`Unknown item ${itemId}`)
+    for (const [path, value] of Object.entries(mutations)) {
+      setPath(item as unknown as Record<string, unknown>, path, value)
+    }
+  }
 
   let wins = 0
   let duration = 0
@@ -82,12 +90,21 @@ function runScenario(scenario: Scenario): Metrics {
 const inputPath = process.argv[2]
 if (inputPath === undefined) throw new Error('Usage: node probe.mjs scenarios.json')
 const scenarios = JSON.parse(readFileSync(inputPath, 'utf8')) as Scenario[]
-const originalById = new Map(enemies.map((enemy) => [enemy.id, JSON.parse(JSON.stringify(enemy))]))
+const originalEnemyById = new Map(enemies.map((enemy) => [enemy.id, JSON.parse(JSON.stringify(enemy))]))
+const originalItemById = new Map(items.map((item) => [item.id, JSON.parse(JSON.stringify(item))]))
 const output = scenarios.map((scenario) => {
-  const enemy = enemies.find((candidate) => candidate.id === scenario.enemyId) as unknown as Record<string, unknown>
-  const original = originalById.get(scenario.enemyId) as Record<string, unknown>
-  for (const key of Object.keys(enemy)) delete enemy[key]
-  Object.assign(enemy, JSON.parse(JSON.stringify(original)))
+  for (const enemy of enemies) {
+    const original = originalEnemyById.get(enemy.id) as Record<string, unknown>
+    const target = enemy as unknown as Record<string, unknown>
+    for (const key of Object.keys(target)) delete target[key]
+    Object.assign(target, JSON.parse(JSON.stringify(original)))
+  }
+  for (const item of items) {
+    const original = originalItemById.get(item.id) as Record<string, unknown>
+    const target = item as unknown as Record<string, unknown>
+    for (const key of Object.keys(target)) delete target[key]
+    Object.assign(target, JSON.parse(JSON.stringify(original)))
+  }
   return { ...scenario, metrics: runScenario(scenario) }
 })
 console.log(JSON.stringify(output))
