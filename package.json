@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "sim": "vite build --config vite.sim.config.ts --logLevel error && node .sim-dist/cli.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
