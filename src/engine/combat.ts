@@ -1,12 +1,14 @@
 import { enemies, gameConfig, items } from '../data'
 import type {
   ActiveEffect,
+  Adjacency,
   EnemyAbility,
   EnemyEffect,
   Item,
   Passive,
   TriggerEffect,
 } from '../data/schema'
+import { areItemsAdjacent, type GridPosition } from './adjacency'
 import { nextMulberry32, normalizeSeed, type Seed } from './rng'
 import {
   advanceStatusDurations,
@@ -34,10 +36,7 @@ export type CombatSide = 'player' | 'enemy'
 export type CombatTriggerName = TriggerEffect['trigger']
 export type CombatTriggerEffectType = TriggerEffect['type']
 
-export interface GridPosition {
-  row: number
-  column: number
-}
+export type { GridPosition } from './adjacency'
 
 export interface ResolvedItemModifiersInput {
   flatDamage?: number
@@ -46,6 +45,9 @@ export interface ResolvedItemModifiersInput {
   critMultiplier?: number
   specialMultiplier?: number
   cooldownMultiplier?: number
+  staminaMultiplier?: number
+  blockFlat?: number
+  effectMultiplier?: number
 }
 
 export interface CombatTriggerEffect {
@@ -60,6 +62,7 @@ export interface BuildItemInput {
   instanceId: string
   itemId: string
   position: GridPosition
+  rotated?: boolean
   sealed?: boolean
   initialCooldown?: number
   resolvedModifiers?: ResolvedItemModifiersInput
@@ -101,16 +104,22 @@ export interface ResolvedItemModifiers {
   critMultiplier: number | null
   specialMultiplier: number
   cooldownMultiplier: number
+  staminaMultiplier: number
+  blockFlat: number
+  effectMultiplier: number
 }
 
 export interface PlayerItemState {
   instanceId: string
   itemId: string
   position: GridPosition
+  size: readonly [number, number]
+  rotated: boolean
   sealed: boolean
   cooldown: number
   baseCooldown: number | null
   staminaCost: number
+  baseStaminaCost: number
   effects: readonly ActiveEffect[]
   passives: readonly Passive[]
   triggers: readonly CombatTriggerEffect[]
@@ -337,6 +346,15 @@ function createResolvedModifiers(input?: ResolvedItemModifiersInput): ResolvedIt
       input?.cooldownMultiplier ?? 0,
       'resolvedModifiers.cooldownMultiplier',
     ),
+    staminaMultiplier: requireFinite(
+      input?.staminaMultiplier ?? 0,
+      'resolvedModifiers.staminaMultiplier',
+    ),
+    blockFlat: requireFinite(input?.blockFlat ?? 0, 'resolvedModifiers.blockFlat'),
+    effectMultiplier: requireFinite(
+      input?.effectMultiplier ?? 0,
+      'resolvedModifiers.effectMultiplier',
+    ),
   }
 }
 
@@ -393,6 +411,8 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
       row: requireGridCoordinate(input.position.row, `${input.instanceId}.position.row`),
       column: requireGridCoordinate(input.position.column, `${input.instanceId}.position.column`),
     },
+    size: [item.size[0], item.size[1]],
+    rotated: input.rotated ?? false,
     sealed: input.sealed ?? false,
     cooldown:
       baseCooldown === null
@@ -403,10 +423,102 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
           ),
     baseCooldown,
     staminaCost: item.stamina ?? 0,
+    baseStaminaCost: item.stamina ?? 0,
     effects: item.effects ?? [],
     passives: item.passives ?? [],
     triggers: [...dataTriggers, ...resolvedTriggers],
     modifiers: createResolvedModifiers(input.resolvedModifiers),
+  }
+}
+
+function adjacencyTargetMatches(adjacency: Adjacency, target: Item): boolean {
+  return adjacency.target === 'all' || target.tags.includes(adjacency.target)
+}
+
+function addAdjacencyTrigger(target: PlayerItemState, adjacency: Adjacency): void {
+  if (adjacency.type === 'onHitPoison') {
+    target.triggers = [
+      ...target.triggers,
+      {
+        trigger: 'onHit',
+        type: 'applyStatus',
+        value: adjacency.value,
+        status: 'poison',
+      },
+    ]
+  } else if (adjacency.type === 'onHitHeal') {
+    target.triggers = [
+      ...target.triggers,
+      { trigger: 'onHit', type: 'heal', value: adjacency.value },
+    ]
+  } else if (adjacency.type === 'onHitGold') {
+    target.triggers = [
+      ...target.triggers,
+      { trigger: 'onHit', type: 'gold', value: adjacency.value },
+    ]
+  }
+}
+
+function addAdjacencyModifier(target: PlayerItemState, adjacency: Adjacency): void {
+  if (adjacency.type === 'critChance') {
+    target.modifiers.critChancePercent = normalizeNumber(
+      target.modifiers.critChancePercent + adjacency.value,
+    )
+  } else if (adjacency.type === 'cdMult') {
+    target.modifiers.cooldownMultiplier = normalizeNumber(
+      target.modifiers.cooldownMultiplier + adjacency.value,
+    )
+  } else if (adjacency.type === 'staminaMult') {
+    target.modifiers.staminaMultiplier = normalizeNumber(
+      target.modifiers.staminaMultiplier + adjacency.value,
+    )
+  } else if (adjacency.type === 'flatDamage') {
+    target.modifiers.flatDamage = normalizeNumber(target.modifiers.flatDamage + adjacency.value)
+  } else if (adjacency.type === 'blockFlat') {
+    target.modifiers.blockFlat = normalizeNumber(target.modifiers.blockFlat + adjacency.value)
+  } else if (adjacency.type === 'effectMult') {
+    target.modifiers.effectMultiplier = normalizeNumber(
+      target.modifiers.effectMultiplier + adjacency.value,
+    )
+  }
+}
+
+/**
+ * Resolves adjacency once over the finalized battle entities. T08 can insert virtual
+ * duplicates before invoking this stage; sealed sources are deliberately excluded.
+ */
+export function applyAdjacencySnapshot(playerItems: PlayerItemState[]): void {
+  const orderedSources = [...playerItems].sort(compareGridOrder)
+
+  for (const source of orderedSources) {
+    if (source.sealed) {
+      continue
+    }
+
+    const sourceDefinition = getItemDefinition(source.itemId)
+
+    for (const adjacency of sourceDefinition.adjacency ?? []) {
+      for (const target of playerItems) {
+        if (target.instanceId === source.instanceId) {
+          continue
+        }
+
+        const targetDefinition = getItemDefinition(target.itemId)
+        if (
+          adjacencyTargetMatches(adjacency, targetDefinition) &&
+          areItemsAdjacent(source, target, adjacency.range8 ?? false)
+        ) {
+          addAdjacencyModifier(target, adjacency)
+          addAdjacencyTrigger(target, adjacency)
+        }
+      }
+    }
+  }
+
+  for (const item of playerItems) {
+    item.staminaCost = normalizeNumber(
+      Math.max(0, item.baseStaminaCost * (1 + item.modifiers.staminaMultiplier)),
+    )
   }
 }
 
@@ -570,6 +682,9 @@ export function createCombatState(setup: CombatSetup): CombatState {
     createCombatTrigger(trigger, `enemy.triggers[${index}]`),
   )
 
+  const playerItems = playerItemEntries.map((entry) => entry.state)
+  applyAdjacencySnapshot(playerItems)
+
   const state: CombatState = {
     tick: 0,
     time: 0,
@@ -597,7 +712,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
         'player.staminaRegenPerSecond',
       ),
       statuses: createStatusState(setup.player?.statuses),
-      items: playerItemEntries.map((entry) => entry.state),
+      items: playerItems,
     },
     enemy: {
       id: setup.enemyId,
@@ -643,6 +758,8 @@ function cloneCombatState(state: CombatState): CombatState {
       items: state.player.items.map((item) => ({
         ...item,
         position: { ...item.position },
+        size: [item.size[0], item.size[1]],
+        triggers: item.triggers.map((trigger) => ({ ...trigger })),
         modifiers: { ...item.modifiers },
       })),
     },
@@ -1131,10 +1248,12 @@ function resolvePlayerEffects(
   damages: CombatDamage[],
   triggerEvents: CombatTriggerEvent[],
 ): void {
+  const effectMultiplier = Math.max(0, 1 + source.modifiers.effectMultiplier)
+
   for (const effect of source.effects) {
     if (effect.type === 'damage' && effect.value !== undefined) {
       const calculation = calculateDamage({
-        base: effect.value,
+        base: effect.value * effectMultiplier,
         flatBonuses: [source.modifiers.flatDamage],
         damageMultipliers: [
           getGlobalPassiveTotal(state.player, 'damageMult'),
@@ -1165,15 +1284,15 @@ function resolvePlayerEffects(
         triggerEvents,
       )
     } else if (effect.type === 'block' && effect.value !== undefined) {
-      applyBlock(state.player, effect.value)
+      applyBlock(state.player, effect.value * effectMultiplier + source.modifiers.blockFlat)
     } else if (effect.type === 'heal' && effect.value !== undefined) {
-      applyHeal(state.player, effect.value)
+      applyHeal(state.player, effect.value * effectMultiplier)
     } else if (
       effect.type === 'applyStatus' &&
       effect.status !== undefined &&
       effect.value !== undefined
     ) {
-      applyStatus(state.enemy.statuses, effect.status, effect.value)
+      applyStatus(state.enemy.statuses, effect.status, effect.value * effectMultiplier)
     } else if (effect.type === 'cleanseSelf') {
       cleansePoisonAndBurn(state.player.statuses)
     }
