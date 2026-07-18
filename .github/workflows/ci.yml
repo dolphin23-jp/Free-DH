@@ -39,10 +39,18 @@ jobs:
         run: pnpm sim -- --runs 1
 
       - name: T23 level 0 design suite
-        run: pnpm sim -- --runs 1000
+        run: pnpm sim -- --runs 1000 > t23-level0.txt
 
       - name: T23 abyss diagnostics
-        run: pnpm exec vite build --config vite.t23.config.ts --logLevel error && node .t23-dist/diagnostic.mjs
+        run: pnpm exec vite build --config vite.t23.config.ts --logLevel error && node .t23-dist/diagnostic.mjs > t23-abyss.txt
+
+      - name: Upload T23 reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: t23-balance-baseline
+          path: |
+            t23-level0.txt
+            t23-abyss.txt
 
       - name: Build
         run: pnpm build
