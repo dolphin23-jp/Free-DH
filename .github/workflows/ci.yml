@@ -38,5 +38,11 @@ jobs:
       - name: Simulator smoke test
         run: pnpm sim -- --runs 1
 
+      - name: T23 level 0 design suite
+        run: pnpm sim -- --runs 1000
+
+      - name: T23 abyss diagnostics
+        run: pnpm exec vite build --config vite.t23.config.ts --logLevel error && node .t23-dist/diagnostic.mjs
+
       - name: Build
         run: pnpm build
