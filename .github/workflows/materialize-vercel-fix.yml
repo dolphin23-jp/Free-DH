@@ -1,0 +1,104 @@
+name: Materialize Vercel lockfile fix
+
+on:
+  push:
+    branches:
+      - agent/bootstrap-vercel-lock
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/fix-vercel-pnpm-lock
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate and verify exact lockfile
+        shell: bash
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts
+          echo "c7bed3e51bbee11d9d42e5f560dcfc38bc31fd76417c3c26f56ff217d5225b16  pnpm-lock.yml" | sha256sum --check --strict
+
+      - name: Write deployment configuration
+        shell: bash
+        run: |
+          cat > vercel.json <<'VERCEL'
+          {
+            "$schema": "https://openapi.vercel.sh/vercel.json",
+            "framework": "vite",
+            "buildCommand": "pnpm build",
+            "outputDirectory": "dist",
+            "installCommand": "pnpm install --frozen-lockfile"
+          }
+          VERCEL
+
+          mkdir -p .github/workflows
+          cat > .github/workflows/ci.yml <<'CI'
+          name: CI
+
+          on:
+            pull_request:
+            push:
+              branches:
+                - main
+
+          permissions:
+            contents: read
+
+          jobs:
+            validate:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+
+                - name: Set up pnpm
+                  uses: pnpm/action-setup@v4
+                  with:
+                    version: 10.13.1
+
+                - name: Set up Node.js
+                  uses: actions/setup-node@v4
+                  with:
+                    node-version: 20
+
+                - name: Install dependencies
+                  run: pnpm install --frozen-lockfile
+
+                - name: Test
+                  run: pnpm test
+
+                - name: Lint
+                  run: pnpm lint
+
+                - name: Simulator smoke test
+                  run: pnpm sim -- --runs 1
+
+                - name: Build
+                  run: pnpm build
+          CI
+
+      - name: Commit target changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yml vercel.json .github/workflows/ci.yml
+          git diff --cached --exit-code && { echo "No changes to commit"; exit 1; } || true
+          git commit -m "Fix Vercel pnpm installs with frozen lockfile"
+          git push origin HEAD:agent/fix-vercel-pnpm-lock
