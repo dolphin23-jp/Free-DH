@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla'
 
 import type { DropBatch } from '../engine/drops'
-import type { ShopListing } from '../engine/shop'
+import { generateShopListing, type ShopListing } from '../engine/shop'
 import {
   createCodexStore,
   exportCodexSnapshot,
@@ -42,6 +42,8 @@ export interface ShopSessionSnapshot {
   listing: ShopListing | null
   purchasedSlots: number[]
   healUsed: boolean
+  cursedChestPurchased: boolean
+  gamblerPurchased: boolean
 }
 
 export interface GameSaveSnapshot {
@@ -59,6 +61,10 @@ interface LegacyGameSaveV1 {
   codex: CodexSnapshot
 }
 
+type LegacyShopListing = Omit<ShopListing, 'specials'> & {
+  specials?: ShopListing['specials']
+}
+
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -72,7 +78,13 @@ function defaultDropProgressSnapshot(): DropProgressSnapshot {
 }
 
 function defaultShopSnapshot(): ShopSessionSnapshot {
-  return { listing: null, purchasedSlots: [], healUsed: false }
+  return {
+    listing: null,
+    purchasedSlots: [],
+    healUsed: false,
+    cursedChestPurchased: false,
+    gamblerPurchased: false,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -145,6 +157,22 @@ function validateDropProgress(snapshot: DropProgressSnapshot): DropProgressSnaps
   return cloneJson(snapshot)
 }
 
+function restoreShopListing(listing: ShopListing | null): ShopListing | null {
+  if (listing === null) return null
+  const candidate = listing as LegacyShopListing
+  if (candidate.specials !== undefined) return cloneJson(candidate as ShopListing)
+  return generateShopListing({
+    runSeed: candidate.runSeed,
+    battleIndex: candidate.battleIndex,
+    rerollCount: candidate.rerollCount,
+    area: candidate.area,
+    abyssLevel: candidate.abyssLevel,
+    ...(candidate.unlockedItemIds === undefined
+      ? {}
+      : { unlockedItemIds: candidate.unlockedItemIds }),
+  })
+}
+
 function validateShop(snapshot: ShopSessionSnapshot): ShopSessionSnapshot {
   if (
     !Array.isArray(snapshot.purchasedSlots) ||
@@ -153,7 +181,21 @@ function validateShop(snapshot: ShopSessionSnapshot): ShopSessionSnapshot {
     throw new Error('purchasedSlots must contain non-negative integers')
   }
   if (typeof snapshot.healUsed !== 'boolean') throw new Error('healUsed must be boolean')
-  return cloneJson(snapshot)
+  const cursedChestPurchased = snapshot.cursedChestPurchased ?? false
+  const gamblerPurchased = snapshot.gamblerPurchased ?? false
+  if (typeof cursedChestPurchased !== 'boolean') {
+    throw new Error('cursedChestPurchased must be boolean')
+  }
+  if (typeof gamblerPurchased !== 'boolean') {
+    throw new Error('gamblerPurchased must be boolean')
+  }
+  return {
+    listing: restoreShopListing(snapshot.listing),
+    purchasedSlots: [...snapshot.purchasedSlots],
+    healUsed: snapshot.healUsed,
+    cursedChestPurchased,
+    gamblerPurchased,
+  }
 }
 
 export function exportGameSave(
@@ -177,6 +219,8 @@ export function exportGameSave(
       listing: cloneJson(shopState.listing),
       purchasedSlots: [...shopState.purchasedSlots],
       healUsed: shopState.healUsed,
+      cursedChestPurchased: shopState.cursedChestPurchased,
+      gamblerPurchased: shopState.gamblerPurchased,
     },
   }
 }
@@ -203,7 +247,7 @@ export function loadGameSave(
   meta.getState().loadSnapshot(snapshot.meta)
   dropProgress.setState(dropData)
   shop.setState(shopData)
-  return snapshot
+  return { ...snapshot, shop: shopData }
 }
 
 export function stringifyGameSave(snapshot: GameSaveSnapshot): string {

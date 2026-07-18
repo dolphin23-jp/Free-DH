@@ -2,11 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 
 import { gameConfig, items } from '../data'
-import { getRerollCost, getShopSellPrice, type ShopOffer } from '../engine/shop'
+import {
+  getRerollCost,
+  getShopSellPrice,
+  type ShopOffer,
+  type ShopSpecialOffer,
+} from '../engine/shop'
 import { codexStore } from '../store/codex'
 import {
   applyShopHeal,
   purchaseShopOffer,
+  purchaseShopSpecialOffer,
   sellInventoryItemToShop,
   shopStore,
 } from '../store/shop'
@@ -64,6 +70,27 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
     }
   }
 
+  const buySpecial = (offer: ShopSpecialOffer) => {
+    const alreadyPurchased =
+      offer.kind === 'cursedChest' ? shop.cursedChestPurchased : shop.gamblerPurchased
+    if (alreadyPurchased) return
+    try {
+      const result = purchaseShopSpecialOffer(inventory, state.gold, offer)
+      state.replaceInventory(result.inventory)
+      runStore.setState({ gold: result.gold })
+      shop.markSpecialPurchased(offer.kind)
+      codexStore.getState().discoverItems([offer.reward.itemId])
+      const name = itemById.get(offer.reward.itemId)?.name ?? offer.reward.itemId
+      setNotice(
+        offer.kind === 'cursedChest'
+          ? `${name}を獲得しました。最大HP-${gameConfig.shop.cursedChest.maxHpPenalty}の呪い付きです。`
+          : `ギャンブル袋から${name}を獲得しました。`,
+      )
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '特別商品を購入できませんでした。')
+    }
+  }
+
   const reroll = () => {
     const cost = getRerollCost(shop.listing!.rerollCount)
     if (state.gold < cost) {
@@ -72,7 +99,7 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
     }
     shop.reroll()
     runStore.setState((current) => ({ gold: current.gold - cost }))
-    setNotice(`${cost}Gで陳列を更新しました。`)
+    setNotice(`${cost}Gで陳列を更新しました。特別イベントは変化しません。`)
   }
 
   const heal = () => {
@@ -101,6 +128,8 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
 
   const rerollCost = getRerollCost(shop.listing.rerollCount)
   const storageFull = state.storage.items.length >= state.storage.capacity
+  const cursedChest = shop.listing.specials.cursedChest
+  const gambler = shop.listing.specials.gambler
 
   return (
     <main className="app-shell shop-screen">
@@ -121,6 +150,7 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
         <div>
           <span>AREA {shop.listing.area}</span>
           <span>SHOP STREAM {shop.listing.streamSeed}</span>
+          <span>EVENT STREAM {shop.listing.specials.streamSeed}</span>
           <span>REROLL {shop.listing.rerollCount}</span>
         </div>
         <button type="button" onClick={reroll} disabled={state.gold < rerollCost}>
@@ -152,6 +182,67 @@ export function ShopScreen({ onClose }: ShopScreenProps) {
           )
         })}
       </section>
+
+      {cursedChest !== null || gambler !== null ? (
+        <section className="shop-specials" aria-label="特別な商人イベント">
+          {cursedChest !== null ? (
+            <article className={`shop-special cursed${shop.cursedChestPurchased ? ' is-purchased' : ''}`}>
+              <div>
+                <p className="eyebrow">Push your luck</p>
+                <h2>呪いの宝箱</h2>
+                <p>
+                  紫以上の装備が確定。ただし装備中は最大HP-
+                  {gameConfig.shop.cursedChest.maxHpPenalty}。
+                </p>
+                {shop.cursedChestPurchased ? (
+                  <strong>
+                    獲得: {itemById.get(cursedChest.reward.itemId)?.name ?? cursedChest.reward.itemId}
+                  </strong>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => buySpecial(cursedChest)}
+                disabled={
+                  shop.cursedChestPurchased || state.gold < cursedChest.cost || storageFull
+                }
+              >
+                {shop.cursedChestPurchased
+                  ? '開封済み'
+                  : storageFull
+                    ? 'ストレージ満杯'
+                    : `${cursedChest.cost}Gで開封`}
+              </button>
+            </article>
+          ) : null}
+
+          {gambler !== null ? (
+            <article className={`shop-special gambler${shop.gamblerPurchased ? ' is-purchased' : ''}`}>
+              <div>
+                <p className="eyebrow">Equal rarity odds</p>
+                <h2>ギャンブル商人</h2>
+                <p>白・緑・青・紫・橙が各{gameConfig.shop.gambler.rarityPercentEach}%の秘密袋。</p>
+                {shop.gamblerPurchased ? (
+                  <strong>
+                    獲得: {itemById.get(gambler.reward.itemId)?.name ?? gambler.reward.itemId}
+                  </strong>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => buySpecial(gambler)}
+                disabled={shop.gamblerPurchased || state.gold < gambler.cost || storageFull}
+              >
+                {shop.gamblerPurchased
+                  ? '購入済み'
+                  : storageFull
+                    ? 'ストレージ満杯'
+                    : `${gambler.cost}Gで購入`}
+              </button>
+            </article>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="shop-services">
         <article className="panel shop-heal">
