@@ -35,6 +35,7 @@
 .shop-close,
 .shop-toolbar button,
 .shop-offer button,
+.shop-special button,
 .shop-heal button,
 .shop-sell-row button {
   padding: 0.72rem 0.9rem;
@@ -75,6 +76,7 @@
 
 .shop-toolbar button:disabled,
 .shop-offer button:disabled,
+.shop-special button:disabled,
 .shop-heal button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -133,6 +135,78 @@
   margin-top: auto;
   color: #f0cf79;
   font-size: 1.1rem;
+}
+
+.shop-specials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.shop-special {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 1.2rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 1rem;
+  background: rgb(0 0 0 / 22%);
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 24%);
+}
+
+.shop-special::before {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  pointer-events: none;
+  content: "";
+}
+
+.shop-special.cursed::before {
+  background: radial-gradient(circle at 15% 50%, #a052d2, transparent 48%);
+}
+
+.shop-special.gambler::before {
+  background: radial-gradient(circle at 15% 50%, #d2a052, transparent 48%);
+}
+
+.shop-special > * {
+  position: relative;
+  z-index: 1;
+}
+
+.shop-special > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.shop-special h2,
+.shop-special p {
+  margin: 0;
+}
+
+.shop-special p:not(.eyebrow) {
+  color: #bdb5a8;
+  font-size: 0.82rem;
+}
+
+.shop-special strong {
+  color: #f0cf79;
+}
+
+.shop-special.cursed button {
+  background: linear-gradient(180deg, #75458d, #3d254a);
+}
+
+.shop-special.gambler button {
+  background: linear-gradient(180deg, #8b632f, #4e3519);
+}
+
+.shop-special.is-purchased {
+  border-color: rgb(240 207 121 / 30%);
 }
 
 .shop-services {
@@ -206,7 +280,8 @@
 @media (max-width: 48rem) {
   .shop-header,
   .shop-toolbar,
-  .shop-heal {
+  .shop-heal,
+  .shop-special {
     align-items: stretch;
     flex-direction: column;
   }
@@ -215,7 +290,8 @@
     justify-content: space-between;
   }
 
-  .shop-offers {
+  .shop-offers,
+  .shop-specials {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -233,7 +309,8 @@
 }
 
 @media (max-width: 28rem) {
-  .shop-offers {
+  .shop-offers,
+  .shop-specials {
     grid-template-columns: 1fr;
   }
 
