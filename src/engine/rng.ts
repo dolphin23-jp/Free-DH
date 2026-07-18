@@ -1,6 +1,11 @@
 export type Seed = number | string
 export type RandomGenerator = () => number
 
+export interface RandomStep {
+  state: number
+  value: number
+}
+
 const UINT32_RANGE = 0x1_0000_0000
 const MULBERRY_INCREMENT = 0x6d2b79f5
 const FNV_OFFSET_BASIS = 0x811c9dc5
@@ -44,18 +49,30 @@ export function fork(seed: Seed, label: string): number {
 }
 
 /**
+ * Advances a serializable mulberry32 state by exactly one draw.
+ */
+export function nextMulberry32(state: number): RandomStep {
+  const nextState = (normalizeSeed(state) + MULBERRY_INCREMENT) >>> 0
+
+  let value = nextState
+  value = Math.imul(value ^ (value >>> 15), value | 1)
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+
+  return {
+    state: nextState,
+    value: ((value ^ (value >>> 14)) >>> 0) / UINT32_RANGE,
+  }
+}
+
+/**
  * Deterministic mulberry32 PRNG returning values in the half-open range [0, 1).
  */
 export function mulberry32(seed: Seed): RandomGenerator {
   let state = normalizeSeed(seed)
 
   return () => {
-    state = (state + MULBERRY_INCREMENT) >>> 0
-
-    let value = state
-    value = Math.imul(value ^ (value >>> 15), value | 1)
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
-
-    return ((value ^ (value >>> 14)) >>> 0) / UINT32_RANGE
+    const step = nextMulberry32(state)
+    state = step.state
+    return step.value
   }
 }
