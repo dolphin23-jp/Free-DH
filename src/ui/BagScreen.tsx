@@ -15,7 +15,6 @@ import { useStore } from 'zustand'
 
 import { getPlacedSize } from '../engine/adjacency'
 import {
-  canPlaceBagItem,
   getBaseSellPrice,
   getItemDefinition,
   moveBagItem,
@@ -27,7 +26,6 @@ import {
 } from '../store/bag'
 import {
   runStore,
-  type RunBagItem,
   type RunInventoryItem,
   type RunInventorySnapshot,
 } from '../store/run'
@@ -172,7 +170,11 @@ function StorageSlot({
   )
 }
 
-function ActionButton({ children, onClick, disabled = false }: {
+function ActionButton({
+  children,
+  onClick,
+  disabled = false,
+}: {
   children: ReactNode
   onClick: () => void
   disabled?: boolean
@@ -307,9 +309,20 @@ export function BagScreen() {
           <h1>Free-DH</h1>
         </div>
         <dl className="run-stats">
-          <div><dt>HP</dt><dd>{state.currentHp}/{state.maxHp}</dd></div>
-          <div><dt>Gold</dt><dd>{state.gold}G</dd></div>
-          <div><dt>Battle</dt><dd>{state.battleIndex + 1}/15</dd></div>
+          <div>
+            <dt>HP</dt>
+            <dd>
+              {state.currentHp}/{state.maxHp}
+            </dd>
+          </div>
+          <div>
+            <dt>Gold</dt>
+            <dd>{state.gold}G</dd>
+          </div>
+          <div>
+            <dt>Battle</dt>
+            <dd>{state.battleIndex + 1}/15</dd>
+          </div>
         </dl>
       </header>
 
@@ -322,8 +335,13 @@ export function BagScreen() {
         <section className="loadout-layout">
           <article className="panel bag-panel">
             <div className="panel-heading">
-              <div><p className="eyebrow">Combat build</p><h2>カバン</h2></div>
-              <span>{state.bag.columns}×{state.bag.rows}</span>
+              <div>
+                <p className="eyebrow">Combat build</p>
+                <h2>カバン</h2>
+              </div>
+              <span>
+                {state.bag.columns}×{state.bag.rows}
+              </span>
             </div>
             <div
               className="bag-grid"
@@ -362,8 +380,13 @@ export function BagScreen() {
 
           <article className="panel storage-panel">
             <div className="panel-heading">
-              <div><p className="eyebrow">Reserve items</p><h2>ストレージ</h2></div>
-              <span>{state.storage.items.length}/{state.storage.capacity}</span>
+              <div>
+                <p className="eyebrow">Reserve items</p>
+                <h2>ストレージ</h2>
+              </div>
+              <span>
+                {state.storage.items.length}/{state.storage.capacity}
+              </span>
             </div>
             <div className="storage-grid">
               {Array.from({ length: state.storage.capacity }, (_unused, index) => (
@@ -379,30 +402,49 @@ export function BagScreen() {
           </article>
 
           <aside className="panel inspector-panel">
-            <div className="panel-heading"><div><p className="eyebrow">Selected</p><h2>装備操作</h2></div></div>
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Selected</p>
+                <h2>装備操作</h2>
+              </div>
+            </div>
             {selectedItem === undefined ? (
               <p className="muted">装備を選択すると、回転・保管・売却ができます。</p>
             ) : (
               <>
-                <div className={`selected-summary rarity-${getItemDefinition(selectedItem.itemId).rarity}`}>
+                <div
+                  className={`selected-summary rarity-${getItemDefinition(selectedItem.itemId).rarity}`}
+                >
                   <ItemFace item={selectedItem} />
                   <p>{getItemDefinition(selectedItem.itemId).size.join('×')}マス</p>
                 </div>
                 <div className="action-stack">
-                  <ActionButton onClick={rotateSelected} disabled={selectedBagItem === undefined}>90°回転</ActionButton>
-                  <ActionButton onClick={storeSelected} disabled={selectedBagItem === undefined}>ストレージへ</ActionButton>
-                  <ActionButton onClick={sellSelected}>売却 {getBaseSellPrice(selectedItem.itemId)}G</ActionButton>
+                  <ActionButton onClick={rotateSelected} disabled={selectedBagItem === undefined}>
+                    90°回転
+                  </ActionButton>
+                  <ActionButton onClick={storeSelected} disabled={selectedBagItem === undefined}>
+                    ストレージへ
+                  </ActionButton>
+                  <ActionButton onClick={sellSelected}>
+                    売却 {getBaseSellPrice(selectedItem.itemId)}G
+                  </ActionButton>
                 </div>
               </>
             )}
-            <p className="notice" role="status">{notice}</p>
-            <p className="touch-hint">スマートフォンでは装備を少し長押ししてから動かします。</p>
+            <p className="notice" role="status">
+              {notice}
+            </p>
+            <p className="touch-hint">
+              スマートフォンでは装備を少し長押ししてから動かします。
+            </p>
           </aside>
         </section>
 
         <DragOverlay>
           {activeItem === undefined ? null : (
-            <div className={`item-card drag-overlay rarity-${getItemDefinition(activeItem.itemId).rarity}`}>
+            <div
+              className={`item-card drag-overlay rarity-${getItemDefinition(activeItem.itemId).rarity}`}
+            >
               <ItemFace item={activeItem} />
             </div>
           )}
@@ -410,8 +452,4 @@ export function BagScreen() {
       </DndContext>
     </main>
   )
-}
-
-export function previewCanPlace(item: RunInventoryItem, inventory: RunInventorySnapshot) {
-  return canPlaceBagItem(inventory.bag, item, { row: 0, column: 0 })
 }
