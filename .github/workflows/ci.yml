@@ -36,14 +36,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: T23 expanded boundary search
-        run: pnpm exec vite build --config vite.t23-search2.config.ts --logLevel error && node .t23-search2-dist/search2.mjs > t23-search2.txt
+      - name: Build standalone T23 probe
+        run: pnpm exec vite build --config vite.t23-probe.config.ts --logLevel error
 
-      - name: Upload T23 search
+      - name: Upload T23 probe
         uses: actions/upload-artifact@v4
         with:
-          name: t23-boundary-search
-          path: t23-search2.txt
+          name: t23-standalone-probe
+          path: .t23-probe-dist/probe.mjs
 
       - name: Build
         run: pnpm build
