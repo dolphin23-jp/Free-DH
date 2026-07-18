@@ -13,6 +13,13 @@
     "storageSlots": 8,
     "initialGold": 15
   },
+  "combat": {
+    "suddenDeath": {
+      "startSeconds": 60,
+      "initialDamage": 1,
+      "damagePerSecond": 1
+    }
+  },
   "drops": {
     "normalSlots": 2,
     "bossSlots": 3,
