@@ -1,0 +1,425 @@
+.battle-launch {
+  position: fixed;
+  right: clamp(0.8rem, 3vw, 2rem);
+  bottom: clamp(0.8rem, 3vw, 2rem);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  max-width: calc(100vw - 1.6rem);
+  padding: 0.85rem;
+  border: 1px solid rgb(255 222 155 / 28%);
+  border-radius: 1rem;
+  background: rgb(20 17 13 / 94%);
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 55%);
+  backdrop-filter: blur(12px);
+}
+
+.battle-launch div {
+  display: grid;
+  min-width: 9rem;
+}
+
+.battle-launch span,
+.combatant-side {
+  color: #c8ad7f;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.battle-launch button,
+.result-button,
+.speed-button {
+  padding: 0.75rem 1rem;
+  border: 1px solid rgb(255 238 190 / 22%);
+  border-radius: 0.7rem;
+  background: linear-gradient(180deg, #8a5c25, #503317);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.battle-launch button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.battle-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.battle-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.battle-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: #c8ad7f;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.speed-button {
+  min-width: 4rem;
+  background: linear-gradient(180deg, #315d59, #1e3c3a);
+}
+
+.replay-progress {
+  height: 0.35rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+}
+
+.replay-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #b87b32, #f0cf79);
+  transition: width 50ms linear;
+}
+
+.battle-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 0.35fr) minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 22rem;
+  align-items: stretch;
+}
+
+.combatant {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: end;
+  overflow: hidden;
+  padding: clamp(1.2rem, 4vw, 2rem);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1.2rem;
+  background:
+    linear-gradient(180deg, transparent 20%, rgb(0 0 0 / 65%)),
+    radial-gradient(circle at 50% 25%, rgb(255 255 255 / 10%), transparent 45%),
+    #211e19;
+  box-shadow: inset 0 0 4rem rgb(0 0 0 / 34%), 0 1rem 3rem rgb(0 0 0 / 28%);
+  transition: border-color 120ms ease, filter 120ms ease, transform 120ms ease;
+}
+
+.combatant-player::before,
+.combatant-enemy::before {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0.12;
+  font-family: Georgia, serif;
+  font-size: clamp(7rem, 20vw, 15rem);
+  font-weight: 900;
+}
+
+.combatant-player::before {
+  content: "P";
+  color: #8dcfc3;
+}
+
+.combatant-enemy::before {
+  content: "E";
+  color: #e08065;
+}
+
+.combatant.is-active {
+  z-index: 2;
+  border-color: #f2c56b;
+  filter: brightness(1.2);
+  transform: translateY(-0.25rem);
+  box-shadow: 0 0 2.5rem rgb(242 197 107 / 24%);
+}
+
+.combatant-heading,
+.hp-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.combatant-heading h2 {
+  margin-top: 0.3rem;
+  font-family: Georgia, serif;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.block-badge {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgb(130 190 237 / 25%);
+  border-radius: 999px;
+  background: rgb(62 116 154 / 25%);
+  color: #a8d6f5;
+  font-weight: 900;
+}
+
+.hp-label {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-track {
+  position: relative;
+  z-index: 1;
+  height: 0.9rem;
+  margin-top: 0.45rem;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.hp-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8c2621, #e05c42);
+  transition: width 100ms ease;
+}
+
+.combatant-player .hp-fill {
+  background: linear-gradient(90deg, #277468, #65c3a9);
+}
+
+.battle-center {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.versus-mark {
+  color: rgb(255 255 255 / 18%);
+  font-family: Georgia, serif;
+  font-size: clamp(3rem, 8vw, 6rem);
+  font-weight: 900;
+}
+
+.phase-indicator {
+  margin-top: 1rem;
+  color: #c8ad7f;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+}
+
+.event-burst {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  pointer-events: none;
+}
+
+.event-chip {
+  max-width: 16rem;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.5rem;
+  background: rgb(13 12 10 / 88%);
+  color: #efe2c6;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-align: center;
+  animation: event-pop 280ms ease both;
+}
+
+.event-damage {
+  color: #ff9b80;
+  font-size: 0.86rem;
+}
+
+.event-heal {
+  color: #82d8a2;
+}
+
+.event-block {
+  color: #91c9ef;
+}
+
+@keyframes event-pop {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.battle-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.7fr) minmax(0, 1.3fr);
+  gap: 1rem;
+}
+
+.activation-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.activation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem;
+  border-left: 3px solid #67bea9;
+  border-radius: 0.4rem;
+  background: rgb(255 255 255 / 4%);
+}
+
+.activation-row.enemy {
+  border-left-color: #de765d;
+}
+
+.activation-row span {
+  color: #aaa397;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.combat-log {
+  display: grid;
+  gap: 0.38rem;
+  max-height: 13rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.combat-log li {
+  display: grid;
+  grid-template-columns: 3.8rem 1fr;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.45rem;
+  background: rgb(0 0 0 / 17%);
+  font-size: 0.75rem;
+}
+
+.combat-log time {
+  color: #c8ad7f;
+  font-variant-numeric: tabular-nums;
+}
+
+.battle-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 1rem;
+  background: linear-gradient(90deg, rgb(42 105 84 / 45%), rgb(255 255 255 / 4%));
+}
+
+.battle-result.playerDefeat {
+  background: linear-gradient(90deg, rgb(111 44 35 / 48%), rgb(255 255 255 / 4%));
+}
+
+.battle-result p {
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.run-result-panel {
+  text-align: center;
+}
+
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+  margin: 2rem 0;
+}
+
+.result-stats div {
+  padding: 0.9rem;
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 5%);
+}
+
+.result-stats dt {
+  color: #aaa397;
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.result-stats dd {
+  margin: 0.3rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+@media (max-width: 55rem) {
+  .battle-stage {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .combatant {
+    min-height: 13rem;
+  }
+
+  .battle-center {
+    min-height: 8rem;
+  }
+
+  .versus-mark {
+    font-size: 3rem;
+  }
+
+  .battle-lower-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 38rem) {
+  .battle-toolbar,
+  .battle-result {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .battle-launch {
+    right: 0.65rem;
+    bottom: 0.65rem;
+    left: 0.65rem;
+    justify-content: space-between;
+  }
+
+  .battle-launch div {
+    min-width: 0;
+  }
+
+  .result-stats {
+    grid-template-columns: 1fr;
+  }
+}
