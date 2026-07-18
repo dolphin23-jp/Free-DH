@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fork, mulberry32, normalizeSeed } from '../src/engine/rng'
+import { fork, mulberry32, nextMulberry32, normalizeSeed } from '../src/engine/rng'
 
 describe('mulberry32', () => {
   it('matches the fixed vector for a known numeric seed', () => {
@@ -14,6 +14,20 @@ describe('mulberry32', () => {
       0.30307188746519387,
       0.7470660470426083,
     ])
+  })
+
+  it('exposes the same sequence through serializable state steps', () => {
+    const random = mulberry32(123456789)
+    let state = normalizeSeed(123456789)
+    const steppedValues: number[] = []
+
+    for (let index = 0; index < 6; index += 1) {
+      const step = nextMulberry32(state)
+      state = step.state
+      steppedValues.push(step.value)
+    }
+
+    expect(steppedValues).toEqual(Array.from({ length: 6 }, () => random()))
   })
 
   it('normalizes numeric seeds to unsigned 32-bit values', () => {
