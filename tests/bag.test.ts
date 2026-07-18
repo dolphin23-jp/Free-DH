@@ -78,7 +78,7 @@ describe('bag geometry', () => {
   })
 
   it('rejects rotation when the rotated shape would leave the bag', () => {
-    const placed = inventory([bagItem('greatsword', 'W06', 0, 2, true)])
+    const placed = inventory([bagItem('greatsword', 'W06', 0, 2)])
     expect(() => rotateBagItem(placed, 'greatsword')).toThrow()
   })
 
