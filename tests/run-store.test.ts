@@ -4,12 +4,16 @@ import { gameConfig } from '../src/data'
 import { fork } from '../src/engine/rng'
 import {
   RUN_BATTLE_COUNT,
+  calculateSoulFragments,
   createEnemyOrder,
   createRunStore,
+  expandBagForBossReward,
   exportRunSnapshot,
+  getAvailableBossExpansionChoices,
   getCurrentBattleSeed,
   getCurrentEnemyId,
   selectCurrentCombatSetup,
+  type BossExpansionChoice,
   type RunInventorySnapshot,
 } from '../src/store'
 
@@ -42,6 +46,12 @@ const initialInventory: RunInventorySnapshot = {
   },
 }
 
+const bossExpansionByBattle = new Map<number, BossExpansionChoice>([
+  [4, 'column'],
+  [9, 'row'],
+  [14, 'column'],
+])
+
 describe('run enemy order', () => {
   it('uses deterministic per-area streams and places each boss fifth', () => {
     expect(createEnemyOrder('run-alpha')).toEqual([
@@ -66,8 +76,40 @@ describe('run enemy order', () => {
   })
 })
 
+describe('boss bag expansion', () => {
+  it('supports the acceptance sequence 4x3 to 5x3 to 5x4 to 6x4', () => {
+    let bag = { columns: 4, rows: 3, items: [] }
+    expect(getAvailableBossExpansionChoices(bag)).toEqual(['column', 'row'])
+
+    bag = expandBagForBossReward(bag, 'column')
+    expect(bag).toMatchObject({ columns: 5, rows: 3 })
+
+    bag = expandBagForBossReward(bag, 'row')
+    expect(bag).toMatchObject({ columns: 5, rows: 4 })
+
+    bag = expandBagForBossReward(bag, 'column')
+    expect(bag).toMatchObject({ columns: 6, rows: 4 })
+    expect(getAvailableBossExpansionChoices(bag)).toEqual([])
+  })
+
+  it('allows alternate choices while respecting the configured 6x4 boss maximum', () => {
+    let bag = { columns: 4, rows: 3, items: [] }
+    bag = expandBagForBossReward(bag, 'row')
+    expect(bag).toMatchObject({ columns: 4, rows: 4 })
+    expect(getAvailableBossExpansionChoices(bag)).toEqual(['column'])
+    expect(() => expandBagForBossReward(bag, 'row')).toThrow('Boss expansion row is not available')
+  })
+})
+
+describe('soul fragment result calculation', () => {
+  it('matches the specified clear and abyss examples', () => {
+    expect(calculateSoulFragments(15, 0, true)).toBe(25)
+    expect(calculateSoulFragments(10, 2, false)).toBe(14)
+  })
+})
+
 describe('run state machine', () => {
-  it('moves from start through fifteen victories to the clear result', () => {
+  it('moves through fifteen victories, three boss rewards, and the clear result', () => {
     const store = createRunStore()
     const initial = store.getState()
 
@@ -93,24 +135,43 @@ describe('run state machine', () => {
         playerMaxHp: 100,
         playerGold: 16 + battleIndex,
       })
+
+      const expansion = bossExpansionByBattle.get(battleIndex)
+      if (expansion !== undefined) {
+        expect(store.getState().phase).toBe('bossReward')
+        if (battleIndex === 9) {
+          store.getState().claimBossReward(expansion, 'additionalDrops')
+          expect(store.getState().phase).toBe('bossReward')
+          expect(store.getState().pendingBossReward).toMatchObject({
+            expansionChoice: expansion,
+            benefitChoice: 'additionalDrops',
+          })
+          store.getState().completeBossBonusDrops()
+        } else {
+          store.getState().claimBossReward(expansion, 'heal')
+        }
+      }
     }
 
     const final = store.getState()
     expect(final.phase).toBe('result')
     expect(final.battleIndex).toBe(14)
     expect(final.battlesWon).toBe(15)
+    expect(final.bag).toMatchObject({ columns: 6, rows: 4 })
     expect(final.result).toEqual({
       outcome: 'cleared',
       battlesWon: 15,
       reachedBattleIndex: 14,
-      finalHp: 86,
+      reachedBattleCount: 15,
+      earnedSoulFragments: 25,
+      finalHp: 100,
       finalMaxHp: 100,
       finalGold: 30,
     })
     expect(getCurrentEnemyId(final)).toBeNull()
   })
 
-  it('ends immediately with a defeat result while preserving progress', () => {
+  it('ends immediately with a defeat result while preserving reached battle and souls', () => {
     const store = createRunStore()
     store.getState().startRun('defeat-run')
 
@@ -140,13 +201,15 @@ describe('run state machine', () => {
       outcome: 'defeated',
       battlesWon: 2,
       reachedBattleIndex: 2,
+      reachedBattleCount: 3,
+      earnedSoulFragments: 3,
       finalHp: 0,
     })
   })
 
-  it('carries HP, gold, inventory, and run-scaling damage across a reload snapshot', () => {
+  it('carries HP, gold, inventory, abyss, and run-scaling damage across a reload snapshot', () => {
     const store = createRunStore()
-    store.getState().startRun('reload-run', initialInventory)
+    store.getState().startRun('reload-run', initialInventory, 2)
 
     const firstSetup = selectCurrentCombatSetup(store.getState())
     expect(firstSetup).toMatchObject({
@@ -176,6 +239,7 @@ describe('run state machine', () => {
     const restoredState = restored.getState()
 
     expect(restoredState.phase).toBe('preBattle')
+    expect(restoredState.abyssLevel).toBe(2)
     expect(restoredState.battleIndex).toBe(1)
     expect(restoredState.currentHp).toBe(83)
     expect(restoredState.maxHp).toBe(105)
@@ -195,9 +259,50 @@ describe('run state machine', () => {
     )
   })
 
+  it('restores both unclaimed and additional-drop boss reward states', () => {
+    const store = createRunStore()
+    store.getState().startRun('boss-reload')
+
+    for (let battleIndex = 0; battleIndex <= 4; battleIndex += 1) {
+      store.getState().beginBattle()
+      store.getState().completeBattle({
+        result: 'playerVictory',
+        playerHp: 70,
+        playerMaxHp: 100,
+        playerGold: 20,
+      })
+    }
+
+    expect(store.getState().phase).toBe('bossReward')
+    const unclaimed = createRunStore(exportRunSnapshot(store.getState()))
+    expect(unclaimed.getState().pendingBossReward).toEqual({
+      battleIndex: 4,
+      expansionChoice: null,
+      benefitChoice: null,
+    })
+
+    unclaimed.getState().claimBossReward('column', 'additionalDrops')
+    const claimed = createRunStore(exportRunSnapshot(unclaimed.getState()))
+    expect(claimed.getState().bag).toMatchObject({ columns: 5, rows: 3 })
+    expect(claimed.getState().pendingBossReward).toMatchObject({
+      expansionChoice: 'column',
+      benefitChoice: 'additionalDrops',
+    })
+
+    claimed.getState().completeBossBonusDrops()
+    expect(claimed.getState()).toMatchObject({
+      phase: 'preBattle',
+      battleIndex: 5,
+      pendingBossReward: null,
+    })
+  })
+
   it('rejects invalid transitions', () => {
     const store = createRunStore()
     expect(() => store.getState().beginBattle()).toThrow('beginBattle requires phase preBattle')
+    expect(() => store.getState().claimBossReward('column', 'heal')).toThrow(
+      'claimBossReward requires phase bossReward',
+    )
 
     store.getState().startRun('invalid-transition')
     expect(() =>
