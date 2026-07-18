@@ -1,0 +1,280 @@
+.codex-screen {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.codex-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.codex-close,
+.codex-tabs button,
+.codex-launch,
+.codex-inline-button,
+.battle-launch .codex-launch-button {
+  padding: 0.72rem 0.95rem;
+  border: 1px solid rgb(255 238 190 / 20%);
+  border-radius: 0.68rem;
+  background: linear-gradient(180deg, #4c536d, #292d3e);
+  color: #f7f1e5;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.codex-close {
+  background: rgb(255 255 255 / 6%);
+}
+
+.codex-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.codex-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 4%);
+}
+
+.codex-summary span {
+  color: #aaa397;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.codex-summary strong {
+  color: #f0cf79;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.codex-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.45rem;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 0.85rem;
+  background: rgb(0 0 0 / 18%);
+}
+
+.codex-tabs button {
+  flex: 1;
+  min-width: 8rem;
+  background: transparent;
+  color: #aaa397;
+}
+
+.codex-tabs button.is-active {
+  background: linear-gradient(180deg, #765029, #452d17);
+  color: #fff4d6;
+}
+
+.codex-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.codex-grid--enemies,
+.codex-grid--recipes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.codex-card {
+  --rarity-color: #d8d4cb;
+  display: flex;
+  min-height: 9.5rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
+  overflow: hidden;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--rarity-color) 65%, transparent);
+  border-left-width: 4px;
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--rarity-color) 15%, transparent), transparent 55%),
+    rgb(255 255 255 / 4%);
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 18%);
+}
+
+.codex-card > span {
+  color: var(--rarity-color);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.codex-card > strong {
+  font-size: 1rem;
+}
+
+.codex-card p,
+.codex-card small {
+  margin: 0;
+  color: #aaa397;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.codex-card--unknown {
+  align-items: center;
+  border-color: rgb(255 255 255 / 8%);
+  border-left-width: 1px;
+  background: rgb(0 0 0 / 18%);
+  text-align: center;
+}
+
+.codex-silhouette {
+  display: grid;
+  width: 3.4rem;
+  height: 3.4rem;
+  place-items: center;
+  border-radius: 45% 55% 48% 52%;
+  background: linear-gradient(145deg, #292722, #11100e);
+  color: rgb(255 255 255 / 22%);
+  font-family: Georgia, serif;
+  font-size: 1.6rem;
+  box-shadow: inset 0 0 1rem rgb(0 0 0 / 60%);
+}
+
+.codex-enemy-card {
+  --rarity-color: #d57d68;
+}
+
+.codex-enemy-card.is-boss {
+  --rarity-color: #f0b74f;
+}
+
+.codex-recipe-card {
+  --rarity-color: #9c88d8;
+}
+
+.codex-launch {
+  position: fixed;
+  right: clamp(0.8rem, 3vw, 2rem);
+  bottom: clamp(0.8rem, 3vw, 2rem);
+  z-index: 22;
+  box-shadow: 0 1rem 2rem rgb(0 0 0 / 38%);
+}
+
+.result-action-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.battle-launch {
+  width: min(48rem, calc(100vw - 1.6rem));
+}
+
+.battle-launch .enemy-forecast {
+  display: grid;
+  min-width: 15rem;
+  flex: 1;
+  gap: 0.22rem;
+}
+
+.enemy-forecast > small {
+  color: #aaa397;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.enemy-forecast__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.enemy-forecast__details em {
+  padding: 0.28rem 0.4rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 6%);
+  color: #d8c9ac;
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.enemy-forecast.is-unknown > strong {
+  color: #aaa397;
+  letter-spacing: 0.18em;
+}
+
+.battle-launch .battle-launch__actions {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.battle-launch .codex-launch-button {
+  background: linear-gradient(180deg, #4c536d, #292d3e);
+}
+
+@media (max-width: 70rem) {
+  .codex-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 48rem) {
+  .codex-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .codex-summary,
+  .codex-grid,
+  .codex-grid--enemies,
+  .codex-grid--recipes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .battle-launch {
+    width: auto;
+  }
+}
+
+@media (max-width: 34rem) {
+  .codex-summary,
+  .codex-grid,
+  .codex-grid--enemies,
+  .codex-grid--recipes {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-launch .battle-launch__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .battle-launch .battle-launch__actions button {
+    min-width: 0;
+    padding-right: 0.55rem;
+    padding-left: 0.55rem;
+  }
+
+  .result-action-row {
+    flex-direction: column;
+  }
+}
