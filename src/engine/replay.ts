@@ -93,10 +93,6 @@ export function createCombatReplay(setup: CombatSetup): CombatReplay {
     eventCursor = state.events.length
   }
 
-  if (state.result === 'ongoing') {
-    throw new Error('Combat replay ended without a terminal result')
-  }
-
   return {
     result: state.result,
     durationSeconds: state.time,
