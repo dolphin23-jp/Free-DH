@@ -77,11 +77,19 @@ export const triggerEffectSchema = z
     type: z.enum(['damage', 'block', 'heal', 'gold', 'reflect', 'applyStatus']),
     value: finiteNumberSchema,
     status: statusSchema.optional(),
+    thresholdPercent: nonNegativeNumberSchema.max(100).optional(),
   })
   .strict()
   .superRefine((effect, context) => {
     if (effect.type === 'applyStatus' && effect.status === undefined) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'applyStatus requires status' })
+    }
+
+    if (effect.trigger !== 'hpBelow' && effect.thresholdPercent !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'thresholdPercent is only valid for hpBelow triggers',
+      })
     }
   })
 
