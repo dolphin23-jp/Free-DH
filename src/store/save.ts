@@ -1,5 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla'
 
+import type { DropBatch } from '../engine/drops'
+import type { ShopListing } from '../engine/shop'
 import {
   createCodexStore,
   exportCodexSnapshot,
@@ -22,12 +24,11 @@ import {
   calculateSoulFragments,
   createRunStore,
   exportRunSnapshot,
+  type RunOutcome,
   type RunSnapshot,
   type RunStoreState,
 } from './run'
 import { shopStore, type ShopSessionState } from './shop'
-import type { DropBatch } from '../engine/drops'
-import type { ShopListing } from '../engine/shop'
 
 export const GAME_SAVE_VERSION = 2
 
@@ -89,7 +90,7 @@ function migrateRunSnapshot(candidate: Record<string, unknown>): RunSnapshot {
   const abyssLevel = typeof candidate.abyssLevel === 'number' ? candidate.abyssLevel : 0
   const phase = candidate.phase
   const oldResult = isRecord(candidate.result) ? candidate.result : null
-  const outcome = oldResult?.outcome === 'cleared' ? 'cleared' : 'defeated'
+  const outcome: RunOutcome = oldResult?.outcome === 'cleared' ? 'cleared' : 'defeated'
   const currentHp = typeof candidate.currentHp === 'number' ? candidate.currentHp : 0
   const maxHp = typeof candidate.maxHp === 'number' ? candidate.maxHp : currentHp
   const gold = typeof candidate.gold === 'number' ? candidate.gold : 0
@@ -145,7 +146,10 @@ function validateDropProgress(snapshot: DropProgressSnapshot): DropProgressSnaps
 }
 
 function validateShop(snapshot: ShopSessionSnapshot): ShopSessionSnapshot {
-  if (!Array.isArray(snapshot.purchasedSlots) || snapshot.purchasedSlots.some((slot) => !Number.isInteger(slot) || slot < 0)) {
+  if (
+    !Array.isArray(snapshot.purchasedSlots) ||
+    snapshot.purchasedSlots.some((slot) => !Number.isInteger(slot) || slot < 0)
+  ) {
     throw new Error('purchasedSlots must contain non-negative integers')
   }
   if (typeof snapshot.healUsed !== 'boolean') throw new Error('healUsed must be boolean')
