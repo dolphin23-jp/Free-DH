@@ -251,6 +251,7 @@ export const enemyTraitSchema = z
     interval: positiveNumberSchema.optional(),
     cap: nonNegativeNumberSchema.optional(),
     disabledBy: statusSchema.optional(),
+    killBonus: nonNegativeNumberSchema.optional(),
   })
   .strict()
 
@@ -369,6 +370,17 @@ export const configSchema = z
         initialBag: bagSizeSchema,
         storageSlots: z.number().int().nonnegative(),
         initialGold: z.number().int().nonnegative(),
+      })
+      .strict(),
+    combat: z
+      .object({
+        suddenDeath: z
+          .object({
+            startSeconds: z.number().int().positive(),
+            initialDamage: positiveNumberSchema,
+            damagePerSecond: positiveNumberSchema,
+          })
+          .strict(),
       })
       .strict(),
     drops: z

@@ -5,6 +5,7 @@ import type {
   EnemyAbility,
   EnemyEffect,
   EnemyTag,
+  EnemyTrait,
   Item,
   Passive,
   Rarity,
@@ -89,6 +90,7 @@ export interface PlayerSetupOverrides {
   stamina?: number
   staminaCap?: number
   staminaRegenPerSecond?: number
+  gold?: number
   statuses?: StatusSetup
 }
 
@@ -160,7 +162,9 @@ export interface PlayerCombatState {
   blockCap: number
   stamina: number
   staminaCap: number
+  baseStaminaRegenPerSecond: number
   staminaRegenPerSecond: number
+  gold: number
   statuses: StatusState
   items: PlayerItemState[]
 }
@@ -173,6 +177,13 @@ export interface EnemyCombatState {
   blockCap: number
   phaseIndex: number
   tags: readonly EnemyTag[]
+  traits: readonly EnemyTrait[]
+  reviveUsed: boolean
+  hitCount: number
+  stolenGold: number
+  killRewardResolved: boolean
+  fled: boolean
+  enrageDamageBonus: number
   statuses: StatusState
   abilities: EnemyAbilityState[]
   triggers: readonly CombatTriggerEffect[]
@@ -318,6 +329,7 @@ function getItemDefinition(itemId: string): Item {
 function getInitialEnemy(enemyId: string): {
   hp: number
   abilities: readonly EnemyAbility[]
+  traits: readonly EnemyTrait[]
   phaseIndex: number
   tags: readonly EnemyTag[]
 } {
@@ -333,6 +345,7 @@ function getInitialEnemy(enemyId: string): {
     return {
       hp: firstPhase.hp,
       abilities: firstPhase.abilities,
+      traits: firstPhase.traits,
       phaseIndex: 0,
       tags: enemy.tags ?? [],
     }
@@ -341,9 +354,27 @@ function getInitialEnemy(enemyId: string): {
   return {
     hp: enemy.hp,
     abilities: enemy.abilities,
+    traits: enemy.traits,
     phaseIndex: 0,
     tags: enemy.tags ?? [],
   }
+}
+
+function getEnemyTrait(
+  traits: readonly EnemyTrait[],
+  type: EnemyTrait['type'],
+): EnemyTrait | undefined {
+  return traits.find((trait) => trait.type === type)
+}
+
+function getEnemyBlockCap(traits: readonly EnemyTrait[]): number {
+  return getEnemyTrait(traits, 'blockRegen')?.cap ?? Number.MAX_SAFE_INTEGER
+}
+
+function getStaminaRegenMultiplier(traits: readonly EnemyTrait[]): number {
+  return traits
+    .filter((trait) => trait.type === 'staminaDrain')
+    .reduce((multiplier, trait) => multiplier * trait.value, 1)
 }
 
 function createResolvedModifiers(input?: ResolvedItemModifiersInput): ResolvedItemModifiers {
@@ -548,6 +579,40 @@ function resolveSealAdjacent(playerItems: PlayerItemState[]): void {
       }
     }
   }
+}
+
+function resolveRandomEnemySeals(
+  playerItems: PlayerItemState[],
+  traits: readonly EnemyTrait[],
+  initialRngState: number,
+): number {
+  let rngState = initialRngState
+
+  for (const trait of traits) {
+    if (trait.type !== 'sealRandomItem') {
+      continue
+    }
+
+    const sealCount = Math.max(0, Math.floor(trait.value))
+    for (let index = 0; index < sealCount; index += 1) {
+      const candidates = playerItems
+        .filter((item) => !item.virtual && !item.sealed)
+        .sort(compareGridOrder)
+
+      if (candidates.length === 0) {
+        break
+      }
+
+      const randomStep = nextMulberry32(rngState)
+      rngState = randomStep.state
+      const target = candidates[Math.floor(randomStep.value * candidates.length)]
+      if (target !== undefined) {
+        target.sealed = true
+      }
+    }
+  }
+
+  return rngState
 }
 
 function compareDuplicateCandidate(left: PlayerItemState, right: PlayerItemState): number {
@@ -858,7 +923,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
     enemyMaxHp,
   )
   const enemyBlockCap = requireFiniteNonNegative(
-    setup.enemy?.blockCap ?? Number.MAX_SAFE_INTEGER,
+    setup.enemy?.blockCap ?? getEnemyBlockCap(initialEnemy.traits),
     'enemy.blockCap',
   )
   const enemyTriggers = (setup.enemy?.triggers ?? []).map((trigger, index) =>
@@ -866,15 +931,22 @@ export function createCombatState(setup: CombatSetup): CombatState {
   )
 
   const playerItems = playerItemEntries.map((entry) => entry.state)
+  let battleRngState = normalizeSeed(setup.seed)
   resolveSealAdjacent(playerItems)
+  battleRngState = resolveRandomEnemySeals(playerItems, initialEnemy.traits, battleRngState)
   resolveDuplicateAdjacent(playerItems)
   applyAdjacencySnapshot(playerItems)
+
+  const baseStaminaRegenPerSecond = requireFiniteNonNegative(
+    setup.player?.staminaRegenPerSecond ?? gameConfig.player.staminaRegenPerSecond,
+    'player.staminaRegenPerSecond',
+  )
 
   const state: CombatState = {
     tick: 0,
     time: 0,
     result: 'ongoing',
-    rngState: normalizeSeed(setup.seed),
+    rngState: battleRngState,
     battleStarted: false,
     terminalTriggersResolved: false,
     consumedTriggerKeys: [],
@@ -892,9 +964,13 @@ export function createCombatState(setup: CombatSetup): CombatState {
         staminaCap,
       ),
       staminaCap,
-      staminaRegenPerSecond: requireFiniteNonNegative(
-        setup.player?.staminaRegenPerSecond ?? gameConfig.player.staminaRegenPerSecond,
-        'player.staminaRegenPerSecond',
+      baseStaminaRegenPerSecond,
+      staminaRegenPerSecond: normalizeNumber(
+        baseStaminaRegenPerSecond * getStaminaRegenMultiplier(initialEnemy.traits),
+      ),
+      gold: requireFiniteNonNegative(
+        setup.player?.gold ?? gameConfig.player.initialGold,
+        'player.gold',
       ),
       statuses: createStatusState(setup.player?.statuses),
       items: playerItems,
@@ -910,6 +986,13 @@ export function createCombatState(setup: CombatSetup): CombatState {
       blockCap: enemyBlockCap,
       phaseIndex: initialEnemy.phaseIndex,
       tags: initialEnemy.tags,
+      traits: initialEnemy.traits,
+      reviveUsed: false,
+      hitCount: 0,
+      stolenGold: 0,
+      killRewardResolved: false,
+      fled: false,
+      enrageDamageBonus: 0,
       statuses: createStatusState(setup.enemy?.statuses),
       abilities: initialEnemy.abilities.map((ability, index) => ({
         index,
@@ -1160,12 +1243,91 @@ function resolveTerminalTriggers(
   )
 }
 
+function updatePlayerStaminaRegenForEnemyTraits(state: CombatState): void {
+  state.player.staminaRegenPerSecond = normalizeNumber(
+    state.player.baseStaminaRegenPerSecond * getStaminaRegenMultiplier(state.enemy.traits),
+  )
+}
+
+function transitionEnemyPhase(state: CombatState): boolean {
+  const definition = enemyById.get(state.enemy.id)
+  if (!definition || !('phases' in definition) || definition.phases === undefined) {
+    return false
+  }
+
+  const nextPhaseIndex = state.enemy.phaseIndex + 1
+  const nextPhase = definition.phases[nextPhaseIndex]
+  if (nextPhase === undefined) {
+    return false
+  }
+
+  state.enemy.phaseIndex = nextPhaseIndex
+  state.enemy.hp = nextPhase.hp
+  state.enemy.maxHp = nextPhase.hp
+  state.enemy.block = 0
+  state.enemy.blockCap = getEnemyBlockCap(nextPhase.traits)
+  state.enemy.traits = nextPhase.traits
+  state.enemy.reviveUsed = false
+  state.enemy.enrageDamageBonus = 0
+  state.enemy.statuses.slowRemainingTicks = 0
+  state.enemy.abilities = nextPhase.abilities.map((ability, index) => ({
+    index,
+    name: ability.name,
+    cooldown: ability.cooldown,
+    baseCooldown: ability.cooldown,
+    effects: ability.effects,
+  }))
+  updatePlayerStaminaRegenForEnemyTraits(state)
+  return true
+}
+
+function reviveEnemy(state: CombatState): boolean {
+  const revive = getEnemyTrait(state.enemy.traits, 'revive')
+  if (revive === undefined || state.enemy.reviveUsed) {
+    return false
+  }
+
+  state.enemy.reviveUsed = true
+  state.enemy.hp = normalizeNumber(Math.min(state.enemy.maxHp, Math.max(0, revive.value)))
+  return state.enemy.hp > 0
+}
+
+function resolveEnemyDeathProtection(state: CombatState): boolean {
+  if (state.enemy.hp > 0) {
+    return false
+  }
+
+  return transitionEnemyPhase(state) || reviveEnemy(state)
+}
+
+function resolveBanditKillGold(state: CombatState): void {
+  if (state.enemy.killRewardResolved) {
+    return
+  }
+
+  const flee = getEnemyTrait(state.enemy.traits, 'fleeAfterHits')
+  if (flee === undefined) {
+    return
+  }
+
+  state.enemy.killRewardResolved = true
+  const recovered = normalizeNumber(state.enemy.stolenGold + (flee.killBonus ?? 0))
+  state.player.gold = normalizeNumber(state.player.gold + recovered)
+  state.goldGained = normalizeNumber(state.goldGained + recovered)
+  state.enemy.stolenGold = 0
+}
+
 function updateResultAndResolveTerminal(
   state: CombatState,
   damages: CombatDamage[],
   triggerEvents: CombatTriggerEvent[],
 ): void {
   if (state.enemy.hp <= 0) {
+    if (resolveEnemyDeathProtection(state)) {
+      return
+    }
+
+    resolveBanditKillGold(state)
     state.result = 'playerVictory'
     resolveTerminalTriggers(state, 'player', damages, triggerEvents)
   } else if (state.player.hp <= 0) {
@@ -1209,6 +1371,7 @@ function executeTriggerEffect(
   if (source.effect.type === 'gold') {
     if (source.side === 'player') {
       state.goldGained = normalizeNumber(state.goldGained + source.effect.value)
+      state.player.gold = normalizeNumber(state.player.gold + source.effect.value)
     }
     return
   }
@@ -1280,7 +1443,7 @@ function applyDirectDamage(
   },
   damages: CombatDamage[],
   triggerEvents: CombatTriggerEvent[],
-): void {
+): CombatDamage {
   const target = getSideState(state, input.targetSide)
   const beforeHp = target.hp
   const applied = applyDamage(target, input.amount, input.pierce)
@@ -1291,7 +1454,13 @@ function applyDirectDamage(
     hpDamage: applied.hpDamage,
   })
 
-  if (afterHp <= 0) {
+  const enemyDeathPrevented =
+    input.targetSide === 'enemy' && afterHp <= 0 && resolveEnemyDeathProtection(state)
+
+  if (afterHp <= 0 && !enemyDeathPrevented) {
+    if (input.targetSide === 'enemy') {
+      resolveBanditKillGold(state)
+    }
     state.result = input.targetSide === 'enemy' ? 'playerVictory' : 'playerDefeat'
   }
 
@@ -1303,13 +1472,13 @@ function applyDirectDamage(
     triggerEvents,
   )
 
-  if (afterHp <= 0) {
+  if (afterHp <= 0 && !enemyDeathPrevented) {
     resolveTerminalTriggers(state, input.sourceSide, damages, triggerEvents)
-    return
+    return damage
   }
 
   if (state.result !== 'ongoing') {
-    return
+    return damage
   }
 
   if (damage.blocked > 0 || damage.hpDamage > 0) {
@@ -1323,7 +1492,29 @@ function applyDirectDamage(
   }
 
   if (state.result !== 'ongoing') {
-    return
+    return damage
+  }
+
+  if (damage.sourceSide === 'player' && damage.targetSide === 'enemy') {
+    const thorns = getEnemyTrait(state.enemy.traits, 'thorns')
+    if (thorns !== undefined && damage.amount > 0) {
+      const reflected = applyDamage(state.player, Math.max(0, thorns.value), false)
+      pushTriggeredDamage(damages, {
+        sourceSide: 'enemy',
+        targetSide: 'player',
+        sourceId: `${state.enemy.id}:trait:thorns`,
+        amount: Math.max(0, thorns.value),
+        critical: false,
+        blocked: reflected.blocked,
+        hpDamage: reflected.hpDamage,
+        pierce: false,
+      })
+      updateResultAndResolveTerminal(state, damages, triggerEvents)
+    }
+  }
+
+  if (state.result !== 'ongoing') {
+    return damage
   }
 
   if (damage.amount > 0 && damage.blocked === damage.amount && damage.hpDamage === 0) {
@@ -1337,7 +1528,7 @@ function applyDirectDamage(
   }
 
   if (state.result !== 'ongoing') {
-    return
+    return damage
   }
 
   resolveHpBelowCrossing(
@@ -1348,6 +1539,8 @@ function applyDirectDamage(
     damages,
     triggerEvents,
   )
+
+  return damage
 }
 
 function applyTrueStatusDamage(
@@ -1428,6 +1621,72 @@ function resolveIntegerSecondStatusDamage(
   // COMBAT_SPEC §3: Player status damage is resolved before Enemy status damage.
   resolveStatusDamageForSide(state, 'player', damages, triggerEvents)
   resolveStatusDamageForSide(state, 'enemy', damages, triggerEvents)
+}
+
+function applySuddenDeathDamage(
+  state: CombatState,
+  targetSide: CombatSide,
+  amount: number,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  const target = getSideState(state, targetSide)
+  const applied = applyDamage(target, amount, true)
+
+  damages.push({
+    sourceSide: oppositeSide(targetSide),
+    targetSide,
+    sourceId: 'suddenDeath',
+    amount: normalizeNumber(amount),
+    critical: false,
+    blocked: applied.blocked,
+    hpDamage: applied.hpDamage,
+    pierce: true,
+    trueDamage: true,
+    triggersAllowed: false,
+  })
+  updateResultAndResolveTerminal(state, damages, triggerEvents)
+}
+
+function resolveSuddenDeath(
+  state: CombatState,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  const config = gameConfig.combat.suddenDeath
+  if (state.tick % TICKS_PER_SECOND !== 0 || state.time < config.startSeconds) {
+    return
+  }
+
+  const elapsedSeconds = state.time - config.startSeconds
+  const amount = config.initialDamage + elapsedSeconds * config.damagePerSecond
+
+  // COMBAT_SPEC §3: Enemy first. A final enemy death ends combat before Player damage.
+  applySuddenDeathDamage(state, 'enemy', amount, damages, triggerEvents)
+  if (state.result === 'ongoing') {
+    applySuddenDeathDamage(state, 'player', amount, damages, triggerEvents)
+  }
+}
+
+function resolveIntegerSecondEnemyTraits(state: CombatState): void {
+  if (state.tick % TICKS_PER_SECOND !== 0) {
+    return
+  }
+
+  for (const trait of state.enemy.traits) {
+    if (trait.type === 'hpRegen') {
+      applyHeal(state.enemy, Math.max(0, trait.value))
+    } else if (trait.type === 'blockRegen') {
+      applyBlock(state.enemy, Math.max(0, trait.value))
+    } else if (trait.type === 'enrage' && trait.interval !== undefined) {
+      const intervalTicks = Math.round(trait.interval / TICK_SECONDS)
+      if (intervalTicks > 0 && state.tick % intervalTicks === 0) {
+        state.enemy.enrageDamageBonus = normalizeNumber(
+          state.enemy.enrageDamageBonus + trait.value,
+        )
+      }
+    }
+  }
 }
 
 function resolveItemBattleStartSpecial(state: CombatState, item: PlayerItemState): void {
@@ -1523,6 +1782,60 @@ function advanceItemDamageScaling(item: PlayerItemState): void {
   }
 }
 
+function hasStatus(state: StatusState, status: StatusKind): boolean {
+  if (status === 'poison') {
+    return state.poisonStacks > 0
+  }
+
+  if (status === 'burn') {
+    return getBurnStacks(state) > 0
+  }
+
+  return isSlowed(state)
+}
+
+function resolveEnemyLifesteal(state: CombatState, hpDamage: number): void {
+  const lifesteal = getEnemyTrait(state.enemy.traits, 'lifesteal')
+  if (
+    lifesteal === undefined ||
+    state.enemy.hp <= 0 ||
+    hpDamage <= 0 ||
+    (lifesteal.disabledBy !== undefined && hasStatus(state.enemy.statuses, lifesteal.disabledBy))
+  ) {
+    return
+  }
+
+  applyHeal(state.enemy, hpDamage * Math.max(0, lifesteal.value))
+}
+
+function resolveEnemyGoldSteal(state: CombatState, amount: number): void {
+  const stolen = normalizeNumber(Math.min(state.player.gold, Math.max(0, amount)))
+  state.player.gold = normalizeNumber(state.player.gold - stolen)
+  state.enemy.stolenGold = normalizeNumber(state.enemy.stolenGold + stolen)
+}
+
+function resolveEnemyFlee(
+  state: CombatState,
+  damages: CombatDamage[],
+  triggerEvents: CombatTriggerEvent[],
+): void {
+  const flee = getEnemyTrait(state.enemy.traits, 'fleeAfterHits')
+  if (flee === undefined || state.enemy.hitCount < flee.value || state.result !== 'ongoing') {
+    return
+  }
+
+  state.enemy.fled = true
+  state.result = 'playerVictory'
+  state.terminalTriggersResolved = true
+  resolveTriggerSources(
+    state,
+    getAllTriggerSources(state, 'player', 'battleWin'),
+    {},
+    damages,
+    triggerEvents,
+  )
+}
+
 function resolvePlayerEffects(
   state: CombatState,
   source: PlayerItemState,
@@ -1594,15 +1907,23 @@ function resolveEnemyEffects(
 ): void {
   for (const effect of source.effects) {
     if (effect.type === 'damage') {
+      const openingFrenzy = getEnemyTrait(state.enemy.traits, 'openingFrenzy')
+      const openingMultiplier =
+        openingFrenzy !== undefined &&
+        openingFrenzy.duration !== undefined &&
+        state.time < openingFrenzy.duration
+          ? openingFrenzy.value
+          : 1
       const calculation = calculateDamage({
-        base: effect.value,
+        base: effect.value + state.enemy.enrageDamageBonus,
+        damageMultipliers: [openingMultiplier - 1],
         critChancePercent: 0,
         critMultiplier: 1,
         damageReduction: getGlobalPassiveTotal(state.player, 'damageReduction'),
         randomValue: takeRandom(state),
       })
 
-      applyDirectDamage(
+      const damage = applyDirectDamage(
         state,
         {
           sourceSide: 'enemy',
@@ -1615,6 +1936,10 @@ function resolveEnemyEffects(
         damages,
         triggerEvents,
       )
+      state.enemy.hitCount += effect.value > 0 ? 1 : 0
+      resolveEnemyLifesteal(state, damage.hpDamage)
+    } else if (effect.type === 'goldSteal') {
+      resolveEnemyGoldSteal(state, effect.value)
     } else if (
       effect.type === 'applyStatus' &&
       effect.status !== undefined &&
@@ -1627,6 +1952,8 @@ function resolveEnemyEffects(
       return
     }
   }
+
+  resolveEnemyFlee(state, damages, triggerEvents)
 }
 
 function activatePlayerItems(
@@ -1707,23 +2034,32 @@ export function stepCombat(state: CombatState): TickResult {
     return { state: nextState, activations, damages, triggerEvents }
   }
 
-  // §3.3 sudden death is introduced with enemy traits in T09.
+  // §3.3: escalating True damage at integer seconds from t=60 onward.
+  resolveSuddenDeath(nextState, damages, triggerEvents)
+  if (nextState.result !== 'ongoing') {
+    return { state: nextState, activations, damages, triggerEvents }
+  }
+
+  // Integer-second traits resolve after the explicitly ordered damage stages.
+  resolveIntegerSecondEnemyTraits(nextState)
 
   // §3.4 player stamina recovery.
+  const staminaRegenPerSecond = normalizeNumber(
+    nextState.player.staminaRegenPerSecond +
+      getGlobalPassiveTotal(nextState.player, 'staminaRegen'),
+  )
   nextState.player.stamina = normalizeNumber(
     Math.min(
       nextState.player.staminaCap,
-      nextState.player.stamina + nextState.player.staminaRegenPerSecond * TICK_SECONDS,
+      nextState.player.stamina + Math.max(0, staminaRegenPerSecond) * TICK_SECONDS,
     ),
   )
 
   // §3.5 all cooldowns advance before either activation phase. Slow changes 0.1 to 0.08.
   const playerCooldownProgress =
-    TICK_SECONDS *
-    (isSlowed(nextState.player.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
+    TICK_SECONDS * (isSlowed(nextState.player.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
   const enemyCooldownProgress =
-    TICK_SECONDS *
-    (isSlowed(nextState.enemy.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
+    TICK_SECONDS * (isSlowed(nextState.enemy.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
 
   for (const item of nextState.player.items) {
     item.cooldown = decrementCooldown(item.cooldown, playerCooldownProgress)
