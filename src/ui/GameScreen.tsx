@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useStore } from 'zustand'
 
 import { enemies } from '../data'
+import { removeTemporaryAffixMaxHp } from '../engine/affixes'
 import { getDropLuckPercent } from '../engine/drops'
 import { createCombatReplay } from '../engine/replay'
 import { dropProgressStore } from '../store/drop-progress'
@@ -73,7 +74,10 @@ export function GameScreen() {
       <BattleView
         replay={replay}
         onComplete={() => {
-          const resolution = battleResolutionFromCombatState(replay.finalState)
+          const resolution = removeTemporaryAffixMaxHp(
+            replay.finalState,
+            battleResolutionFromCombatState(replay.finalState),
+          )
           if (resolution.result === 'playerVictory' && state.runSeed !== null) {
             const enemy = currentEnemyId === null ? undefined : enemyById.get(currentEnemyId)
             if (enemy === undefined) throw new Error('Victory enemy metadata is unavailable')
