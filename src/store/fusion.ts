@@ -24,7 +24,6 @@ export interface FusionResult {
 }
 
 const itemIdSet = new Set(items.map((item) => item.id))
-const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]))
 const recipeByPair = new Map<string, Recipe>()
 
 function pairKey(firstItemId: string, secondItemId: string): string {
