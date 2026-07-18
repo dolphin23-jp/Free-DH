@@ -17,7 +17,7 @@
     { "id": "EN_A3_04", "name": "炎の悪魔", "area": 3, "isBoss": false, "hp": 170, "gold": 19, "abilities": [{ "name": "火炎弾", "cooldown": 1.8, "effects": [{ "type": "damage", "value": 5 }, { "type": "applyStatus", "status": "burn", "value": 1 }] }], "traits": [], "hint": "炎が体を焼き続ける", "counterTags": ["cleanse", "heal", "speed"] },
     { "id": "EN_A3_05", "name": "魔王", "area": 3, "isBoss": true, "gold": 60, "hint": "全てを試される", "counterTags": [], "phases": [
       { "name": "第1形態", "hp": 280, "abilities": [{ "name": "暗黒斬", "cooldown": 2.2, "effects": [{ "type": "damage", "value": 16 }] }], "traits": [{ "type": "blockRegen", "value": 5, "cap": 25 }] },
-      { "name": "第2形態", "hp": 220, "abilities": [{ "name": "狂乱撃", "cooldown": 1.2, "effects": [{ "type": "damage", "value": 26 }] }], "traits": [{ "type": "enrage", "value": 4, "interval": 6 }] }
+      { "name": "第2形態", "hp": 220, "abilities": [{ "name": "狂乱撃", "cooldown": 1.2, "effects": [{ "type": "damage", "value": 27 }] }], "traits": [{ "type": "enrage", "value": 4, "interval": 6 }] }
     ] }
   ]
 }
