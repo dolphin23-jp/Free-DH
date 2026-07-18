@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from 'zustand'
 
 import { affixPool, items } from '../data'
+import { resolveAffixEffects } from '../engine/affixes'
 import type { DropBatch, DroppedItem } from '../engine/drops'
 import { runStore, type RunInventoryItem } from '../store/run'
 
@@ -13,13 +14,14 @@ interface DropScreenProps {
 const itemById = new Map(items.map((item) => [item.id, item]))
 const affixById = new Map(affixPool.map((affix) => [affix.id, affix]))
 
-function toInventoryItem(drop: DroppedItem): RunInventoryItem {
+export function dropToInventoryItem(drop: DroppedItem): RunInventoryItem {
   return {
     instanceId: drop.instanceId,
     itemId: drop.itemId,
     affixIds: [...drop.affixIds],
     rotated: false,
     runDamageBonus: 0,
+    ...resolveAffixEffects(drop.affixIds),
   }
 }
 
@@ -98,7 +100,7 @@ export function DropScreen({ batch, onComplete }: DropScreenProps) {
       bag: state.bag,
       storage: {
         ...state.storage,
-        items: [...state.storage.items, toInventoryItem(drop)],
+        items: [...state.storage.items, dropToInventoryItem(drop)],
       },
     })
     setDecisions((current) => ({ ...current, [drop.instanceId]: 'claimed' }))
