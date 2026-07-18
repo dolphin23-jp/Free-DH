@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f4f5f7;
-  background: #10131a;
+  color: #f6f1e6;
+  background: #11100e;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -14,6 +14,10 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background:
+    radial-gradient(circle at 20% 0%, rgb(112 77 36 / 28%), transparent 36rem),
+    radial-gradient(circle at 90% 90%, rgb(47 83 74 / 25%), transparent 32rem),
+    #11100e;
 }
 
 button,
@@ -23,40 +27,397 @@ select {
   font: inherit;
 }
 
-.app-shell {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
+button {
+  color: inherit;
 }
 
-.hero {
-  width: min(100%, 44rem);
-  padding: clamp(2rem, 6vw, 4rem);
-  border: 1px solid rgb(255 255 255 / 12%);
+.app-shell {
+  min-height: 100vh;
+  width: min(100%, 88rem);
+  margin: 0 auto;
+  padding: clamp(1rem, 3vw, 2.5rem);
+}
+
+.intro-panel {
+  width: min(100%, 42rem);
+  margin: 10vh auto 0;
+  padding: clamp(2rem, 7vw, 4.5rem);
+  border: 1px solid rgb(255 234 195 / 16%);
   border-radius: 1.5rem;
-  background: rgb(255 255 255 / 4%);
-  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 30%);
+  background: linear-gradient(145deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 2%));
+  box-shadow: 0 2rem 6rem rgb(0 0 0 / 42%);
 }
 
 .eyebrow {
-  margin: 0 0 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  margin: 0 0 0.55rem;
+  color: #c8ad7f;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.17em;
   text-transform: uppercase;
-  color: #b6bfd3;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
 }
 
 h1 {
-  margin: 0;
-  font-size: clamp(3rem, 12vw, 6rem);
-  line-height: 0.95;
+  margin-bottom: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.8rem, 8vw, 5.5rem);
+  line-height: 0.92;
+  letter-spacing: -0.05em;
 }
 
-.status {
-  margin: 1.5rem 0 0;
-  max-width: 34rem;
-  color: #c8cede;
-  line-height: 1.7;
+h2 {
+  margin-bottom: 0;
+  font-size: 1.25rem;
+}
+
+.bag-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.game-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.5rem 0 1.25rem;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.run-stats {
+  display: flex;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.run-stats div {
+  min-width: 6.2rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 4%);
+}
+
+.run-stats dt {
+  color: #aaa397;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.run-stats dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.loadout-layout {
+  display: grid;
+  grid-template-columns: minmax(28rem, 1.5fr) minmax(19rem, 0.9fr) minmax(15rem, 0.7fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.panel {
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1.1rem;
+  background: linear-gradient(155deg, rgb(255 255 255 / 6%), rgb(255 255 255 / 2%));
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 22%);
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.panel-heading > span {
+  color: #c8ad7f;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.bag-grid {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 2px solid #5d472d;
+  border-radius: 1rem;
+  background:
+    linear-gradient(rgb(255 255 255 / 3%), rgb(0 0 0 / 12%)),
+    #241d15;
+  box-shadow: inset 0 0 2rem rgb(0 0 0 / 45%);
+}
+
+.bag-cell {
+  min-width: 0;
+  min-height: 0;
+  border: 1px dashed rgb(229 200 146 / 24%);
+  border-radius: 0.55rem;
+  background: rgb(0 0 0 / 14%);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.bag-cell.is-over,
+.storage-slot.is-over {
+  border-color: #f3c467;
+  background: rgb(243 196 103 / 18%);
+}
+
+.item-card {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.18rem;
+  overflow: hidden;
+  padding: 0.55rem;
+  border: 2px solid var(--rarity-color, #d7d0c2);
+  border-radius: 0.65rem;
+  background:
+    linear-gradient(140deg, color-mix(in srgb, var(--rarity-color) 20%, #211d18), #171512 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 7%), 0 0.4rem 1rem rgb(0 0 0 / 35%);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: filter 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.item-card:hover {
+  filter: brightness(1.12);
+}
+
+.item-card:active {
+  cursor: grabbing;
+}
+
+.item-card.is-selected {
+  box-shadow: 0 0 0 3px #f6e2ad, 0 0.7rem 1.8rem rgb(0 0 0 / 45%);
+}
+
+.item-card.is-dragging {
+  opacity: 0.28;
+}
+
+.item-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: clamp(0.72rem, 1.4vw, 1rem);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-card__rarity,
+.item-card__id {
+  opacity: 0.74;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.rarity-common { --rarity-color: #d8d4cb; }
+.rarity-uncommon { --rarity-color: #79cb86; }
+.rarity-rare { --rarity-color: #72aefa; }
+.rarity-epic { --rarity-color: #bd82f4; }
+.rarity-legendary { --rarity-color: #f4ad44; }
+
+.storage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.storage-slot {
+  position: relative;
+  min-height: 5.4rem;
+  padding: 0.35rem;
+  border: 1px dashed rgb(255 255 255 / 16%);
+  border-radius: 0.75rem;
+  background: rgb(0 0 0 / 15%);
+}
+
+.storage-slot .item-card {
+  width: 100%;
+  height: 100%;
+}
+
+.storage-slot__number {
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0.28rem;
+  z-index: 1;
+  color: rgb(255 255 255 / 22%);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.inspector-panel {
+  position: sticky;
+  top: 1rem;
+}
+
+.selected-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-left: 4px solid var(--rarity-color);
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 4%);
+}
+
+.selected-summary p {
+  margin: 0.5rem 0 0;
+  color: #aaa397;
+  font-size: 0.82rem;
+}
+
+.action-stack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.action-button {
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.65rem;
+  background: linear-gradient(180deg, #6a4c27, #49331c);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.action-button:hover:not(:disabled) {
+  filter: brightness(1.14);
+}
+
+.action-button:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.muted,
+.touch-hint {
+  color: #aaa397;
+  line-height: 1.55;
+}
+
+.notice {
+  min-height: 3rem;
+  margin: 1rem 0 0;
+  padding: 0.75rem;
+  border-radius: 0.6rem;
+  background: rgb(0 0 0 / 20%);
+  color: #e6d2a8;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.touch-hint {
+  margin: 0.8rem 0 0;
+  font-size: 0.72rem;
+}
+
+.drag-overlay {
+  width: 9rem;
+  min-height: 5rem;
+  pointer-events: none;
+  transform: rotate(2deg);
+  box-shadow: 0 1.2rem 2.5rem rgb(0 0 0 / 55%);
+}
+
+@media (max-width: 72rem) {
+  .loadout-layout {
+    grid-template-columns: minmax(25rem, 1.35fr) minmax(18rem, 0.8fr);
+  }
+
+  .inspector-panel {
+    position: static;
+    grid-column: 1 / -1;
+  }
+
+  .action-stack {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 48rem) {
+  .app-shell {
+    padding: 0.8rem;
+  }
+
+  .game-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .run-stats {
+    width: 100%;
+  }
+
+  .run-stats div {
+    min-width: 0;
+    flex: 1;
+    padding: 0.65rem;
+  }
+
+  .loadout-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .inspector-panel {
+    grid-column: auto;
+  }
+
+  .bag-grid {
+    gap: 0.22rem;
+    padding: 0.35rem;
+  }
+
+  .item-card {
+    padding: 0.4rem;
+  }
+
+  .storage-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .storage-slot {
+    min-height: 4.8rem;
+  }
+
+  .storage-slot .item-card strong {
+    font-size: 0.65rem;
+  }
+
+  .action-stack {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 25rem) {
+  .storage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
