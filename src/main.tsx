@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
 import './ui/styles.css'
 import './ui/battle.css'
+import './ui/drop.css'
 
 const root = document.getElementById('root')
 
