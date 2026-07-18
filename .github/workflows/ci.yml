@@ -35,19 +35,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: T23 level 0 report
-        run: pnpm sim -- --runs 1000 > t23-level0-final.txt
-
-      - name: T23 final abyss report
-        run: pnpm exec vite build --config vite.t23-final.config.ts --logLevel error && node .t23-final-dist/diagnostic.mjs > t23-abyss-final.txt
-
-      - name: Upload T23 final report
-        uses: actions/upload-artifact@v4
-        with:
-          name: t23-final-report
-          path: |
-            t23-level0-final.txt
-            t23-abyss-final.txt
+      - name: Simulator smoke test
+        run: pnpm sim -- --runs 1
 
       - name: Build
         run: pnpm build
