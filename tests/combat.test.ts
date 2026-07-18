@@ -8,13 +8,13 @@ describe('combat engine skeleton', () => {
       build: [
         {
           instanceId: 'lower-item',
-          itemId: 'W01',
+          itemId: 'W02',
           position: { row: 1, column: 0 },
           initialCooldown: 0,
         },
         {
           instanceId: 'upper-item',
-          itemId: 'W01',
+          itemId: 'W02',
           position: { row: 0, column: 2 },
           initialCooldown: 0,
         },
@@ -32,13 +32,19 @@ describe('combat engine skeleton', () => {
 
     const secondTick = stepCombat(firstTick.state)
 
-    expect(secondTick.activations).toEqual([
-      { side: 'player', sourceId: 'upper-item' },
-      { side: 'player', sourceId: 'lower-item' },
-    ])
+    expect(secondTick.activations).toEqual([{ side: 'player', sourceId: 'upper-item' }])
     expect(secondTick.state.player.stamina).toBe(0)
-    expect(secondTick.state.player.items.map((item) => item.cooldown)).toEqual([1.2, 1.2])
+    expect(secondTick.state.player.items.map((item) => item.cooldown)).toEqual([0, 1.8])
     expect(secondTick.state.enemy.hp).toBe(37)
+
+    let delayedActivation = secondTick
+    for (let index = 0; index < 10; index += 1) {
+      delayedActivation = stepCombat(delayedActivation.state)
+    }
+
+    expect(delayedActivation.activations).toEqual([{ side: 'player', sourceId: 'lower-item' }])
+    expect(delayedActivation.state.player.items[0]?.cooldown).toBe(1.8)
+    expect(delayedActivation.state.enemy.hp).toBe(29)
   })
 
   it('resolves the player phase before enemy abilities and supports provisional block/damage', () => {
