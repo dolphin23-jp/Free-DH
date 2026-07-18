@@ -38,6 +38,19 @@ function normalized(value: number): number {
   return Number(value.toFixed(10))
 }
 
+function restoreDefinition(target: MutableEnemyDefinition, source: MutableEnemyDefinition): void {
+  const restored = JSON.parse(JSON.stringify(source)) as MutableEnemyDefinition
+  Object.keys(target).forEach((key) => delete (target as unknown as Record<string, unknown>)[key])
+  Object.assign(target, restored)
+}
+
+function restoreAllEnemyDefinitions(): void {
+  for (const enemy of mutableEnemies) {
+    const base = baseEnemyById.get(enemy.id)
+    if (base !== undefined) restoreDefinition(enemy, base)
+  }
+}
+
 function scaleAbilities(abilities: MutableEnemyAbility[], attackMultiplier: number): void {
   for (const ability of abilities) {
     for (const effect of ability.effects) {
@@ -81,13 +94,9 @@ export function prepareAbyssEnemyDefinition(
   abyssLevel: number,
   elite: boolean,
 ): AbyssEnemyModifiers {
+  restoreAllEnemyDefinitions()
   const target = mutableEnemies.find((enemy) => enemy.id === enemyId)
-  const base = baseEnemyById.get(enemyId)
-  if (target === undefined || base === undefined) throw new Error(`Unknown enemy id: ${enemyId}`)
-
-  const restored = JSON.parse(JSON.stringify(base)) as MutableEnemyDefinition
-  Object.keys(target).forEach((key) => delete (target as unknown as Record<string, unknown>)[key])
-  Object.assign(target, restored)
+  if (target === undefined) throw new Error(`Unknown enemy id: ${enemyId}`)
 
   const modifiers = getAbyssEnemyModifiers(abyssLevel, elite)
   if (target.phases !== undefined) {
