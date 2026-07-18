@@ -36,22 +36,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Simulator smoke test
-        run: pnpm sim -- --runs 1
+      - name: T23 focused parameter search
+        run: pnpm exec vite build --config vite.t23-search.config.ts --logLevel error && node .t23-search-dist/search.mjs > t23-search.txt
 
-      - name: T23 level 0 design suite
-        run: pnpm sim -- --runs 1000 > t23-level0.txt
-
-      - name: T23 abyss diagnostics
-        run: pnpm exec vite build --config vite.t23.config.ts --logLevel error && node .t23-dist/diagnostic.mjs > t23-abyss.txt
-
-      - name: Upload T23 reports
+      - name: Upload T23 search
         uses: actions/upload-artifact@v4
         with:
-          name: t23-balance-candidate
-          path: |
-            t23-level0.txt
-            t23-abyss.txt
+          name: t23-parameter-search
+          path: t23-search.txt
 
       - name: Build
         run: pnpm build
