@@ -30,26 +30,13 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Test
-        continue-on-error: true
         run: pnpm test
 
       - name: Lint
         run: pnpm lint
 
-      - name: T23 level 0 design suite
-        run: pnpm sim -- --runs 1000 > t23-level0-final.txt
-
-      - name: T23 abyss diagnostics
-        run: pnpm exec vite build --config vite.t23.config.ts --logLevel error && node .t23-dist/diagnostic.mjs > t23-abyss-final.txt
-
-      - name: Upload final T23 reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: t23-balance-final
-          path: |
-            t23-level0-final.txt
-            t23-abyss-final.txt
+      - name: Simulator smoke test
+        run: pnpm sim -- --runs 1
 
       - name: Build
-        continue-on-error: true
         run: pnpm build
