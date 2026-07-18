@@ -1,9 +1,11 @@
 import { enemies, gameConfig, items } from '../data'
-import type { ActiveEffect, EnemyAbility, EnemyEffect, Item } from '../data/schema'
+import type { ActiveEffect, EnemyAbility, EnemyEffect, Item, Passive } from '../data/schema'
+import { nextMulberry32, normalizeSeed, type Seed } from './rng'
 
 export const TICK_SECONDS = 0.1
 const EPSILON = 1e-9
 const PRECISION_DIGITS = 10
+const DAMAGE_PRECISION_FACTOR = 10
 
 export type CombatResult = 'ongoing' | 'playerVictory' | 'playerDefeat'
 export type CombatSide = 'player' | 'enemy'
@@ -13,12 +15,22 @@ export interface GridPosition {
   column: number
 }
 
+export interface ResolvedItemModifiersInput {
+  flatDamage?: number
+  damageMultiplier?: number
+  critChancePercent?: number
+  critMultiplier?: number
+  specialMultiplier?: number
+  cooldownMultiplier?: number
+}
+
 export interface BuildItemInput {
   instanceId: string
   itemId: string
   position: GridPosition
   sealed?: boolean
   initialCooldown?: number
+  resolvedModifiers?: ResolvedItemModifiersInput
 }
 
 export interface PlayerSetupOverrides {
@@ -41,8 +53,18 @@ export interface EnemySetupOverrides {
 export interface CombatSetup {
   build: readonly BuildItemInput[]
   enemyId: string
+  seed: Seed
   player?: PlayerSetupOverrides
   enemy?: EnemySetupOverrides
+}
+
+export interface ResolvedItemModifiers {
+  flatDamage: number
+  damageMultiplier: number
+  critChancePercent: number
+  critMultiplier: number | null
+  specialMultiplier: number
+  cooldownMultiplier: number
 }
 
 export interface PlayerItemState {
@@ -54,6 +76,8 @@ export interface PlayerItemState {
   baseCooldown: number | null
   staminaCost: number
   effects: readonly ActiveEffect[]
+  passives: readonly Passive[]
+  modifiers: ResolvedItemModifiers
 }
 
 export interface EnemyAbilityState {
@@ -89,6 +113,7 @@ export interface CombatState {
   tick: number
   time: number
   result: CombatResult
+  rngState: number
   player: PlayerCombatState
   enemy: EnemyCombatState
 }
@@ -98,9 +123,37 @@ export interface CombatActivation {
   sourceId: string
 }
 
+export interface CombatDamage {
+  sourceSide: CombatSide
+  targetSide: CombatSide
+  sourceId: string
+  amount: number
+  critical: boolean
+  blocked: number
+  hpDamage: number
+  pierce: boolean
+}
+
 export interface TickResult {
   state: CombatState
   activations: CombatActivation[]
+  damages: CombatDamage[]
+}
+
+export interface DamageCalculationInput {
+  base: number
+  flatBonuses?: readonly number[]
+  damageMultipliers?: readonly number[]
+  critChancePercent: number
+  critMultiplier: number
+  specialMultiplier?: number
+  damageReduction?: number
+  randomValue: number
+}
+
+export interface DamageCalculation {
+  amount: number
+  critical: boolean
 }
 
 const itemById = new Map<string, Item>(items.map((item) => [item.id, item]))
@@ -111,9 +164,29 @@ function normalizeNumber(value: number): number {
   return Math.abs(rounded) < EPSILON ? 0 : rounded
 }
 
+function roundDamage(value: number): number {
+  return normalizeNumber(Math.round(value * DAMAGE_PRECISION_FACTOR) / DAMAGE_PRECISION_FACTOR)
+}
+
+function requireFinite(value: number, label: string): number {
+  if (!Number.isFinite(value)) {
+    throw new RangeError(`${label} must be finite`)
+  }
+
+  return normalizeNumber(value)
+}
+
 function requireFiniteNonNegative(value: number, label: string): number {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${label} must be a finite non-negative number`)
+  }
+
+  return normalizeNumber(value)
+}
+
+function requireFinitePositive(value: number, label: string): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${label} must be a finite positive number`)
   }
 
   return normalizeNumber(value)
@@ -125,6 +198,10 @@ function requireGridCoordinate(value: number, label: string): number {
   }
 
   return value
+}
+
+function sum(values: readonly number[]): number {
+  return values.reduce((total, value) => total + value, 0)
 }
 
 function getItemDefinition(itemId: string): Item {
@@ -165,6 +242,32 @@ function getInitialEnemy(enemyId: string): {
   }
 }
 
+function createResolvedModifiers(input?: ResolvedItemModifiersInput): ResolvedItemModifiers {
+  return {
+    flatDamage: requireFinite(input?.flatDamage ?? 0, 'resolvedModifiers.flatDamage'),
+    damageMultiplier: requireFinite(
+      input?.damageMultiplier ?? 0,
+      'resolvedModifiers.damageMultiplier',
+    ),
+    critChancePercent: requireFinite(
+      input?.critChancePercent ?? 0,
+      'resolvedModifiers.critChancePercent',
+    ),
+    critMultiplier:
+      input?.critMultiplier === undefined
+        ? null
+        : requireFinitePositive(input.critMultiplier, 'resolvedModifiers.critMultiplier'),
+    specialMultiplier: requireFiniteNonNegative(
+      input?.specialMultiplier ?? 1,
+      'resolvedModifiers.specialMultiplier',
+    ),
+    cooldownMultiplier: requireFinite(
+      input?.cooldownMultiplier ?? 0,
+      'resolvedModifiers.cooldownMultiplier',
+    ),
+  }
+}
+
 function createPlayerItemState(input: BuildItemInput): PlayerItemState {
   const item = getItemDefinition(input.itemId)
   const baseCooldown = item.cooldown ?? null
@@ -191,18 +294,145 @@ function createPlayerItemState(input: BuildItemInput): PlayerItemState {
     baseCooldown,
     staminaCost: item.stamina ?? 0,
     effects: item.effects ?? [],
+    passives: item.passives ?? [],
+    modifiers: createResolvedModifiers(input.resolvedModifiers),
+  }
+}
+
+function passiveConditionMatches(passive: Passive, player: PlayerCombatState): boolean {
+  if (passive.condition === undefined) {
+    return true
+  }
+
+  if (passive.condition === 'hpBelow50') {
+    return player.hp < player.maxHp * 0.5
+  }
+
+  return false
+}
+
+function getGlobalPassiveTotal(player: PlayerCombatState, type: Passive['type']): number {
+  let total = 0
+
+  for (const item of player.items) {
+    if (item.sealed) {
+      continue
+    }
+
+    for (const passive of item.passives) {
+      if (
+        passive.type === type &&
+        passive.selfOnly !== true &&
+        passiveConditionMatches(passive, player)
+      ) {
+        total += passive.value
+      }
+    }
+  }
+
+  return normalizeNumber(total)
+}
+
+function getSourcePassiveTotal(item: PlayerItemState, type: Passive['type']): number {
+  return normalizeNumber(
+    item.passives
+      .filter((passive) => passive.type === type && passive.selfOnly === true)
+      .reduce((total, passive) => total + passive.value, 0),
+  )
+}
+
+function getSourceCritMultiplier(item: PlayerItemState): number {
+  if (item.modifiers.critMultiplier !== null) {
+    return item.modifiers.critMultiplier
+  }
+
+  const itemOverride = item.passives.find((passive) => passive.type === 'critMultiplier')
+  return itemOverride?.value ?? gameConfig.player.critMultiplier
+}
+
+export function calculateModifiedCooldown(
+  baseCooldown: number,
+  modifiers: readonly number[],
+): number {
+  const validBaseCooldown = requireFiniteNonNegative(baseCooldown, 'baseCooldown')
+  const totalModifier = sum(modifiers.map((modifier) => requireFinite(modifier, 'cooldown modifier')))
+  const maximumReduction = gameConfig.player.maximumCooldownReductionPercent / 100
+  const cappedModifier = Math.max(-maximumReduction, totalModifier)
+  const modifiedCooldown = validBaseCooldown * (1 + cappedModifier)
+
+  return normalizeNumber(Math.max(gameConfig.player.minimumCooldownSeconds, modifiedCooldown))
+}
+
+function calculatePlayerItemCooldown(state: CombatState, item: PlayerItemState): number {
+  if (item.baseCooldown === null) {
+    return 0
+  }
+
+  const sourceCdMultiplier = item.passives
+    .filter((passive) => passive.type === 'cdMult')
+    .reduce((total, passive) => total + passive.value, 0)
+
+  return calculateModifiedCooldown(item.baseCooldown, [
+    getGlobalPassiveTotal(state.player, 'allCdMult'),
+    sourceCdMultiplier,
+    item.modifiers.cooldownMultiplier,
+  ])
+}
+
+export function calculateDamage(input: DamageCalculationInput): DamageCalculation {
+  const base = requireFiniteNonNegative(input.base, 'damage.base')
+  const flatDamage = sum(
+    (input.flatBonuses ?? []).map((bonus) => requireFinite(bonus, 'flat damage bonus')),
+  )
+  const multiplierTotal = sum(
+    (input.damageMultipliers ?? []).map((modifier) =>
+      requireFinite(modifier, 'damage multiplier'),
+    ),
+  )
+  const critChancePercent = Math.min(
+    100,
+    Math.max(0, requireFinite(input.critChancePercent, 'crit chance percent')),
+  )
+  const critMultiplier = requireFinitePositive(input.critMultiplier, 'crit multiplier')
+  const specialMultiplier = requireFiniteNonNegative(
+    input.specialMultiplier ?? 1,
+    'special multiplier',
+  )
+  const damageReduction = requireFiniteNonNegative(
+    input.damageReduction ?? 0,
+    'damage reduction',
+  )
+  const randomValue = requireFinite(input.randomValue, 'random value')
+
+  if (randomValue < 0 || randomValue >= 1) {
+    throw new RangeError('random value must be in the half-open range [0, 1)')
+  }
+
+  const critical = randomValue < critChancePercent / 100
+  const additiveDamage = base + flatDamage
+  const multipliedDamage = additiveDamage * (1 + multiplierTotal)
+  const criticalDamage = multipliedDamage * (critical ? critMultiplier : 1)
+  const specialDamage = criticalDamage * specialMultiplier
+  const reducedDamage = Math.max(0, specialDamage - damageReduction)
+
+  return {
+    amount: roundDamage(reducedDamage),
+    critical,
   }
 }
 
 export function createCombatState(setup: CombatSetup): CombatState {
   const instanceIds = new Set<string>()
-  const playerItems = setup.build.map((input) => {
+  const playerItemEntries = setup.build.map((input) => {
     if (instanceIds.has(input.instanceId)) {
       throw new Error(`Duplicate item instance id: ${input.instanceId}`)
     }
 
     instanceIds.add(input.instanceId)
-    return createPlayerItemState(input)
+    return {
+      input,
+      state: createPlayerItemState(input),
+    }
   })
 
   const playerMaxHp = requireFiniteNonNegative(
@@ -223,19 +453,17 @@ export function createCombatState(setup: CombatSetup): CombatState {
   )
 
   const initialEnemy = getInitialEnemy(setup.enemyId)
-  const enemyMaxHp = requireFiniteNonNegative(
-    setup.enemy?.hp ?? initialEnemy.hp,
-    'enemy.hp',
-  )
+  const enemyMaxHp = requireFiniteNonNegative(setup.enemy?.hp ?? initialEnemy.hp, 'enemy.hp')
   const enemyBlockCap = requireFiniteNonNegative(
     setup.enemy?.blockCap ?? Number.MAX_SAFE_INTEGER,
     'enemy.blockCap',
   )
 
-  return {
+  const state: CombatState = {
     tick: 0,
     time: 0,
     result: 'ongoing',
+    rngState: normalizeSeed(setup.seed),
     player: {
       hp: playerHp,
       maxHp: playerMaxHp,
@@ -253,7 +481,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
         setup.player?.staminaRegenPerSecond ?? gameConfig.player.staminaRegenPerSecond,
         'player.staminaRegenPerSecond',
       ),
-      items: playerItems,
+      items: playerItemEntries.map((entry) => entry.state),
     },
     enemy: {
       id: setup.enemyId,
@@ -277,6 +505,14 @@ export function createCombatState(setup: CombatSetup): CombatState {
       })),
     },
   }
+
+  for (const entry of playerItemEntries) {
+    if (entry.input.initialCooldown === undefined && entry.state.baseCooldown !== null) {
+      entry.state.cooldown = calculatePlayerItemCooldown(state, entry.state)
+    }
+  }
+
+  return state
 }
 
 function cloneCombatState(state: CombatState): CombatState {
@@ -287,6 +523,7 @@ function cloneCombatState(state: CombatState): CombatState {
       items: state.player.items.map((item) => ({
         ...item,
         position: { ...item.position },
+        modifiers: { ...item.modifiers },
       })),
     },
     enemy: {
@@ -308,14 +545,24 @@ function applyBlock(target: { block: number; blockCap: number }, amount: number)
   target.block = normalizeNumber(Math.min(target.blockCap, target.block + amount))
 }
 
-function applyDamage(target: { hp: number; block: number }, amount: number): void {
+function applyDamage(
+  target: { hp: number; block: number },
+  amount: number,
+  pierce: boolean,
+): { blocked: number; hpDamage: number } {
   if (amount <= 0) {
-    return
+    return { blocked: 0, hpDamage: 0 }
   }
 
-  const blocked = Math.min(target.block, amount)
-  target.block = normalizeNumber(target.block - blocked)
-  target.hp = normalizeNumber(target.hp - (amount - blocked))
+  const blocked = pierce ? 0 : Math.min(target.block, amount)
+  const hpDamage = normalizeNumber(amount - blocked)
+
+  if (!pierce) {
+    target.block = normalizeNumber(target.block - blocked)
+  }
+  target.hp = normalizeNumber(target.hp - hpDamage)
+
+  return { blocked: normalizeNumber(blocked), hpDamage }
 }
 
 function updateResultAfterDamage(state: CombatState): void {
@@ -326,11 +573,51 @@ function updateResultAfterDamage(state: CombatState): void {
   }
 }
 
-function resolvePlayerEffects(state: CombatState, effects: readonly ActiveEffect[]): void {
-  for (const effect of effects) {
+function takeRandom(state: CombatState): number {
+  const step = nextMulberry32(state.rngState)
+  state.rngState = step.state
+  return step.value
+}
+
+function resolvePlayerEffects(
+  state: CombatState,
+  source: PlayerItemState,
+  damages: CombatDamage[],
+): void {
+  for (const effect of source.effects) {
     if (effect.type === 'damage' && effect.value !== undefined) {
-      applyDamage(state.enemy, effect.value)
+      const calculation = calculateDamage({
+        base: effect.value,
+        flatBonuses: [source.modifiers.flatDamage],
+        damageMultipliers: [
+          getGlobalPassiveTotal(state.player, 'damageMult'),
+          source.modifiers.damageMultiplier,
+        ],
+        critChancePercent:
+          gameConfig.player.baseCritChancePercent +
+          getGlobalPassiveTotal(state.player, 'critChance') +
+          getSourcePassiveTotal(source, 'critChance') +
+          source.modifiers.critChancePercent,
+        critMultiplier: getSourceCritMultiplier(source),
+        specialMultiplier: source.modifiers.specialMultiplier,
+        damageReduction: 0,
+        randomValue: takeRandom(state),
+      })
+      const pierce = effect.pierce ?? false
+      const applied = applyDamage(state.enemy, calculation.amount, pierce)
+
+      damages.push({
+        sourceSide: 'player',
+        targetSide: 'enemy',
+        sourceId: source.instanceId,
+        amount: calculation.amount,
+        critical: calculation.critical,
+        blocked: applied.blocked,
+        hpDamage: applied.hpDamage,
+        pierce,
+      })
       updateResultAfterDamage(state)
+      // T06 attaches onHit/onDamaged processing at this post-application boundary.
     } else if (effect.type === 'block' && effect.value !== undefined) {
       applyBlock(state.player, effect.value)
     }
@@ -341,11 +628,34 @@ function resolvePlayerEffects(state: CombatState, effects: readonly ActiveEffect
   }
 }
 
-function resolveEnemyEffects(state: CombatState, effects: readonly EnemyEffect[]): void {
-  for (const effect of effects) {
+function resolveEnemyEffects(
+  state: CombatState,
+  source: EnemyAbilityState,
+  damages: CombatDamage[],
+): void {
+  for (const effect of source.effects) {
     if (effect.type === 'damage') {
-      applyDamage(state.player, effect.value)
+      const calculation = calculateDamage({
+        base: effect.value,
+        critChancePercent: 0,
+        critMultiplier: 1,
+        damageReduction: getGlobalPassiveTotal(state.player, 'damageReduction'),
+        randomValue: takeRandom(state),
+      })
+      const applied = applyDamage(state.player, calculation.amount, false)
+
+      damages.push({
+        sourceSide: 'enemy',
+        targetSide: 'player',
+        sourceId: `${state.enemy.id}:ability:${source.index}`,
+        amount: calculation.amount,
+        critical: calculation.critical,
+        blocked: applied.blocked,
+        hpDamage: applied.hpDamage,
+        pierce: false,
+      })
       updateResultAfterDamage(state)
+      // T06 attaches onHit/onDamaged processing at this post-application boundary.
     }
 
     if (state.result !== 'ongoing') {
@@ -362,7 +672,11 @@ function compareGridOrder(left: PlayerItemState, right: PlayerItemState): number
   )
 }
 
-function activatePlayerItems(state: CombatState, activations: CombatActivation[]): void {
+function activatePlayerItems(
+  state: CombatState,
+  activations: CombatActivation[],
+  damages: CombatDamage[],
+): void {
   const orderedItems = [...state.player.items].sort(compareGridOrder)
 
   for (const item of orderedItems) {
@@ -380,13 +694,17 @@ function activatePlayerItems(state: CombatState, activations: CombatActivation[]
     }
 
     state.player.stamina = normalizeNumber(state.player.stamina - item.staminaCost)
-    item.cooldown = Math.max(item.baseCooldown, gameConfig.player.minimumCooldownSeconds)
+    item.cooldown = calculatePlayerItemCooldown(state, item)
     activations.push({ side: 'player', sourceId: item.instanceId })
-    resolvePlayerEffects(state, item.effects)
+    resolvePlayerEffects(state, item, damages)
   }
 }
 
-function activateEnemyAbilities(state: CombatState, activations: CombatActivation[]): void {
+function activateEnemyAbilities(
+  state: CombatState,
+  activations: CombatActivation[],
+  damages: CombatDamage[],
+): void {
   for (const ability of state.enemy.abilities) {
     if (state.result !== 'ongoing') {
       return
@@ -396,25 +714,23 @@ function activateEnemyAbilities(state: CombatState, activations: CombatActivatio
       continue
     }
 
-    ability.cooldown = Math.max(
-      ability.baseCooldown,
-      gameConfig.player.minimumCooldownSeconds,
-    )
+    ability.cooldown = calculateModifiedCooldown(ability.baseCooldown, [])
     activations.push({
       side: 'enemy',
       sourceId: `${state.enemy.id}:ability:${ability.index}`,
     })
-    resolveEnemyEffects(state, ability.effects)
+    resolveEnemyEffects(state, ability, damages)
   }
 }
 
 export function stepCombat(state: CombatState): TickResult {
   if (state.result !== 'ongoing') {
-    return { state, activations: [] }
+    return { state, activations: [], damages: [] }
   }
 
   const nextState = cloneCombatState(state)
   const activations: CombatActivation[] = []
+  const damages: CombatDamage[] = []
 
   // §3.1: advance the integer tick first; derive time to avoid accumulated drift.
   nextState.tick += 1
@@ -440,10 +756,10 @@ export function stepCombat(state: CombatState): TickResult {
   }
 
   // §3.6-7: player grid order, then enemy ability array order.
-  activatePlayerItems(nextState, activations)
-  activateEnemyAbilities(nextState, activations)
+  activatePlayerItems(nextState, activations, damages)
+  activateEnemyAbilities(nextState, activations, damages)
 
-  return { state: nextState, activations }
+  return { state: nextState, activations, damages }
 }
 
 export function runTicks(initialState: CombatState, count: number): CombatState {
