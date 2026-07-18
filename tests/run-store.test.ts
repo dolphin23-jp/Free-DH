@@ -14,6 +14,7 @@ import {
   getCurrentEnemyId,
   selectCurrentCombatSetup,
   type BossExpansionChoice,
+  type RunBagState,
   type RunInventorySnapshot,
 } from '../src/store'
 
@@ -78,7 +79,7 @@ describe('run enemy order', () => {
 
 describe('boss bag expansion', () => {
   it('supports the acceptance sequence 4x3 to 5x3 to 5x4 to 6x4', () => {
-    let bag = { columns: 4, rows: 3, items: [] }
+    let bag: RunBagState = { columns: 4, rows: 3, items: [] }
     expect(getAvailableBossExpansionChoices(bag)).toEqual(['column', 'row'])
 
     bag = expandBagForBossReward(bag, 'column')
@@ -93,7 +94,7 @@ describe('boss bag expansion', () => {
   })
 
   it('allows alternate choices while respecting the configured 6x4 boss maximum', () => {
-    let bag = { columns: 4, rows: 3, items: [] }
+    let bag: RunBagState = { columns: 4, rows: 3, items: [] }
     bag = expandBagForBossReward(bag, 'row')
     expect(bag).toMatchObject({ columns: 4, rows: 4 })
     expect(getAvailableBossExpansionChoices(bag)).toEqual(['column'])
