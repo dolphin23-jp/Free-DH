@@ -20,6 +20,7 @@ describe('combat engine skeleton', () => {
         },
       ],
       enemyId: 'EN_A1_01',
+      seed: 'combat',
       player: { stamina: 0.8 },
       enemy: { initialCooldowns: [99] },
     })
@@ -58,6 +59,7 @@ describe('combat engine skeleton', () => {
         },
       ],
       enemyId: 'EN_A1_01',
+      seed: 'combat',
       enemy: { initialCooldowns: [0] },
     })
 
@@ -83,6 +85,7 @@ describe('combat engine skeleton', () => {
         },
       ],
       enemyId: 'EN_A1_01',
+      seed: 'combat',
       player: { maxHp: 1_000_000, hp: 1_000_000 },
       enemy: { hp: 1_000_000, initialCooldowns: [10_000] },
     })
@@ -90,6 +93,7 @@ describe('combat engine skeleton', () => {
     const finalState = runTicks(initialState, 1000)
     const numericValues = [
       finalState.time,
+      finalState.rngState,
       finalState.player.hp,
       finalState.player.block,
       finalState.player.stamina,
