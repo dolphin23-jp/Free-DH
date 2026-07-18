@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { affixPool, gameConfig, items } from '../src/data'
+import { removeTemporaryAffixMaxHp, resolveAffixEffects } from '../src/engine/affixes'
 import {
   buildRarityDistribution,
   generateDropBatch,
@@ -8,10 +9,12 @@ import {
   getPityAfterDrops,
   type DropGenerationRequest,
 } from '../src/engine/drops'
+import { createCombatReplay } from '../src/engine/replay'
 import {
   createDropProgressStore,
   type DropProgressStorage,
 } from '../src/store/drop-progress'
+import { battleResolutionFromCombatState } from '../src/store/run'
 
 const baseRequest: Omit<DropGenerationRequest, 'legendaryMissBattles'> = {
   runSeed: 'drop-test',
@@ -119,6 +122,48 @@ describe('deterministic drop stream', () => {
         }
       }
     }
+  })
+})
+
+describe('affix combat effects', () => {
+  it('maps every current affix into resolved modifiers or triggers', () => {
+    expect(resolveAffixEffects(affixPool.map((affix) => affix.id))).toEqual({
+      resolvedModifiers: {
+        critChancePercent: 5,
+        flatDamage: 2,
+        staminaMultiplier: -0.15,
+        cooldownMultiplier: -0.07,
+        blockFlat: 2,
+      },
+      resolvedTriggers: [
+        { trigger: 'onKill', type: 'heal', value: 3 },
+        { trigger: 'battleStart', type: 'maxHp', value: 5 },
+        { trigger: 'battleWin', type: 'gold', value: 2 },
+      ],
+    })
+  })
+
+  it('applies max-HP affixes in battle without accumulating them into run base HP', () => {
+    const replay = createCombatReplay({
+      build: [
+        {
+          instanceId: 'affixed-dragon-sword',
+          itemId: 'W14',
+          position: { row: 0, column: 0 },
+          ...resolveAffixEffects(['AF06']),
+        },
+      ],
+      enemyId: 'EN_A1_01',
+      seed: 'affix-max-hp',
+    })
+    expect(replay.finalState.player.maxHp).toBe(105)
+
+    const normalized = removeTemporaryAffixMaxHp(
+      replay.finalState,
+      battleResolutionFromCombatState(replay.finalState),
+    )
+    expect(normalized.playerMaxHp).toBe(100)
+    expect(normalized.playerHp).toBeLessThanOrEqual(100)
   })
 })
 
