@@ -1,11 +1,25 @@
 import { enemies, gameConfig, items } from '../data'
 import type { ActiveEffect, EnemyAbility, EnemyEffect, Item, Passive } from '../data/schema'
 import { nextMulberry32, normalizeSeed, type Seed } from './rng'
+import {
+  advanceStatusDurations,
+  applyStatus,
+  cleansePoisonAndBurn,
+  cloneStatusState,
+  createStatusState,
+  getBurnStacks,
+  isSlowed,
+  SLOW_COOLDOWN_PROGRESS_MULTIPLIER,
+  type StatusKind,
+  type StatusSetup,
+  type StatusState,
+} from './status'
 
 export const TICK_SECONDS = 0.1
 const EPSILON = 1e-9
 const PRECISION_DIGITS = 10
 const DAMAGE_PRECISION_FACTOR = 10
+const TICKS_PER_SECOND = 10
 
 export type CombatResult = 'ongoing' | 'playerVictory' | 'playerDefeat'
 export type CombatSide = 'player' | 'enemy'
@@ -41,6 +55,7 @@ export interface PlayerSetupOverrides {
   stamina?: number
   staminaCap?: number
   staminaRegenPerSecond?: number
+  statuses?: StatusSetup
 }
 
 export interface EnemySetupOverrides {
@@ -48,6 +63,7 @@ export interface EnemySetupOverrides {
   block?: number
   blockCap?: number
   initialCooldowns?: readonly number[]
+  statuses?: StatusSetup
 }
 
 export interface CombatSetup {
@@ -96,6 +112,7 @@ export interface PlayerCombatState {
   stamina: number
   staminaCap: number
   staminaRegenPerSecond: number
+  statuses: StatusState
   items: PlayerItemState[]
 }
 
@@ -106,6 +123,7 @@ export interface EnemyCombatState {
   block: number
   blockCap: number
   phaseIndex: number
+  statuses: StatusState
   abilities: EnemyAbilityState[]
 }
 
@@ -132,6 +150,9 @@ export interface CombatDamage {
   blocked: number
   hpDamage: number
   pierce: boolean
+  trueDamage: boolean
+  triggersAllowed: boolean
+  status?: StatusKind
 }
 
 export interface TickResult {
@@ -429,10 +450,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
     }
 
     instanceIds.add(input.instanceId)
-    return {
-      input,
-      state: createPlayerItemState(input),
-    }
+    return { input, state: createPlayerItemState(input) }
   })
 
   const playerMaxHp = requireFiniteNonNegative(
@@ -481,6 +499,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
         setup.player?.staminaRegenPerSecond ?? gameConfig.player.staminaRegenPerSecond,
         'player.staminaRegenPerSecond',
       ),
+      statuses: createStatusState(setup.player?.statuses),
       items: playerItemEntries.map((entry) => entry.state),
     },
     enemy: {
@@ -493,6 +512,7 @@ export function createCombatState(setup: CombatSetup): CombatState {
       ),
       blockCap: enemyBlockCap,
       phaseIndex: initialEnemy.phaseIndex,
+      statuses: createStatusState(setup.enemy?.statuses),
       abilities: initialEnemy.abilities.map((ability, index) => ({
         index,
         name: ability.name,
@@ -520,6 +540,7 @@ function cloneCombatState(state: CombatState): CombatState {
     ...state,
     player: {
       ...state.player,
+      statuses: cloneStatusState(state.player.statuses),
       items: state.player.items.map((item) => ({
         ...item,
         position: { ...item.position },
@@ -528,13 +549,14 @@ function cloneCombatState(state: CombatState): CombatState {
     },
     enemy: {
       ...state.enemy,
+      statuses: cloneStatusState(state.enemy.statuses),
       abilities: state.enemy.abilities.map((ability) => ({ ...ability })),
     },
   }
 }
 
-function decrementCooldown(cooldown: number): number {
-  return normalizeNumber(Math.max(0, cooldown - TICK_SECONDS))
+function decrementCooldown(cooldown: number, progress = TICK_SECONDS): number {
+  return normalizeNumber(Math.max(0, cooldown - progress))
 }
 
 function applyBlock(target: { block: number; blockCap: number }, amount: number): void {
@@ -579,6 +601,65 @@ function takeRandom(state: CombatState): number {
   return step.value
 }
 
+function pushNormalDamage(
+  damages: CombatDamage[],
+  input: Omit<CombatDamage, 'trueDamage' | 'triggersAllowed'>,
+): void {
+  damages.push({ ...input, trueDamage: false, triggersAllowed: true })
+}
+
+function applyTrueStatusDamage(
+  state: CombatState,
+  targetSide: CombatSide,
+  status: 'poison' | 'burn',
+  amount: number,
+  damages: CombatDamage[],
+): void {
+  if (amount <= 0 || state.result !== 'ongoing') {
+    return
+  }
+
+  const target = targetSide === 'player' ? state.player : state.enemy
+  const applied = applyDamage(target, amount, true)
+
+  damages.push({
+    sourceSide: targetSide === 'player' ? 'enemy' : 'player',
+    targetSide,
+    sourceId: `status:${status}`,
+    amount: normalizeNumber(amount),
+    critical: false,
+    blocked: applied.blocked,
+    hpDamage: applied.hpDamage,
+    pierce: true,
+    trueDamage: true,
+    triggersAllowed: false,
+    status,
+  })
+  updateResultAfterDamage(state)
+}
+
+function resolveStatusDamageForSide(
+  state: CombatState,
+  targetSide: CombatSide,
+  damages: CombatDamage[],
+): void {
+  const statuses = targetSide === 'player' ? state.player.statuses : state.enemy.statuses
+
+  // Poison before burn is the provisional within-entity ordering recorded in SPEC_TODO.
+  applyTrueStatusDamage(state, targetSide, 'poison', statuses.poisonStacks, damages)
+  applyTrueStatusDamage(state, targetSide, 'burn', getBurnStacks(statuses), damages)
+}
+
+function resolveIntegerSecondStatusDamage(state: CombatState, damages: CombatDamage[]): void {
+  if (state.tick % TICKS_PER_SECOND !== 0) {
+    return
+  }
+
+  // COMBAT_SPEC §3: Player status damage is resolved before Enemy status damage.
+  resolveStatusDamageForSide(state, 'player', damages)
+  resolveStatusDamageForSide(state, 'enemy', damages)
+}
+
 function resolvePlayerEffects(
   state: CombatState,
   source: PlayerItemState,
@@ -606,7 +687,7 @@ function resolvePlayerEffects(
       const pierce = effect.pierce ?? false
       const applied = applyDamage(state.enemy, calculation.amount, pierce)
 
-      damages.push({
+      pushNormalDamage(damages, {
         sourceSide: 'player',
         targetSide: 'enemy',
         sourceId: source.instanceId,
@@ -617,9 +698,16 @@ function resolvePlayerEffects(
         pierce,
       })
       updateResultAfterDamage(state)
-      // T06 attaches onHit/onDamaged processing at this post-application boundary.
     } else if (effect.type === 'block' && effect.value !== undefined) {
       applyBlock(state.player, effect.value)
+    } else if (
+      effect.type === 'applyStatus' &&
+      effect.status !== undefined &&
+      effect.value !== undefined
+    ) {
+      applyStatus(state.enemy.statuses, effect.status, effect.value)
+    } else if (effect.type === 'cleanseSelf') {
+      cleansePoisonAndBurn(state.player.statuses)
     }
 
     if (state.result !== 'ongoing') {
@@ -644,7 +732,7 @@ function resolveEnemyEffects(
       })
       const applied = applyDamage(state.player, calculation.amount, false)
 
-      damages.push({
+      pushNormalDamage(damages, {
         sourceSide: 'enemy',
         targetSide: 'player',
         sourceId: `${state.enemy.id}:ability:${source.index}`,
@@ -655,7 +743,12 @@ function resolveEnemyEffects(
         pierce: false,
       })
       updateResultAfterDamage(state)
-      // T06 attaches onHit/onDamaged processing at this post-application boundary.
+    } else if (
+      effect.type === 'applyStatus' &&
+      effect.status !== undefined &&
+      effect.value !== undefined
+    ) {
+      applyStatus(state.player.statuses, effect.status, effect.value)
     }
 
     if (state.result !== 'ongoing') {
@@ -736,7 +829,12 @@ export function stepCombat(state: CombatState): TickResult {
   nextState.tick += 1
   nextState.time = normalizeNumber(nextState.tick * TICK_SECONDS)
 
-  // §3.2 status damage is introduced in T05.
+  // §3.2: status True damage at integer seconds, Player then Enemy.
+  resolveIntegerSecondStatusDamage(nextState, damages)
+  if (nextState.result !== 'ongoing') {
+    return { state: nextState, activations, damages }
+  }
+
   // §3.3 sudden death is introduced with enemy traits in T09.
 
   // §3.4 player stamina recovery.
@@ -747,13 +845,24 @@ export function stepCombat(state: CombatState): TickResult {
     ),
   )
 
-  // §3.5 all cooldowns advance before either activation phase.
+  // §3.5 all cooldowns advance before either activation phase. Slow changes 0.1 to 0.08.
+  const playerCooldownProgress =
+    TICK_SECONDS *
+    (isSlowed(nextState.player.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
+  const enemyCooldownProgress =
+    TICK_SECONDS *
+    (isSlowed(nextState.enemy.statuses) ? SLOW_COOLDOWN_PROGRESS_MULTIPLIER : 1)
+
   for (const item of nextState.player.items) {
-    item.cooldown = decrementCooldown(item.cooldown)
+    item.cooldown = decrementCooldown(item.cooldown, playerCooldownProgress)
   }
   for (const ability of nextState.enemy.abilities) {
-    ability.cooldown = decrementCooldown(ability.cooldown)
+    ability.cooldown = decrementCooldown(ability.cooldown, enemyCooldownProgress)
   }
+
+  // Existing timed statuses advance before action phases; new applications retain full duration.
+  advanceStatusDurations(nextState.player.statuses)
+  advanceStatusDurations(nextState.enemy.statuses)
 
   // §3.6-7: player grid order, then enemy ability array order.
   activatePlayerItems(nextState, activations, damages)
