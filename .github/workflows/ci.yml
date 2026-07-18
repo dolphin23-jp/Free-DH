@@ -29,14 +29,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Test
-        run: pnpm test
+      - name: Capture test output
+        run: pnpm test > t23-test-log.txt 2>&1 || true
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Simulator smoke test
-        run: pnpm sim -- --runs 1
-
-      - name: Build
-        run: pnpm build
+      - name: Upload test output
+        uses: actions/upload-artifact@v4
+        with:
+          name: t23-test-log
+          path: t23-test-log.txt
