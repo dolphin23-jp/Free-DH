@@ -35,5 +35,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Simulator smoke test
+        run: pnpm sim -- --runs 1
+
       - name: Build
         run: pnpm build
