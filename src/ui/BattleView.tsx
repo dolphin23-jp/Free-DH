@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useStore } from 'zustand'
 
 import { enemies, items } from '../data'
 import type { CombatEvent, CombatSide } from '../engine/combat'
@@ -10,6 +11,7 @@ import {
   type CombatReplay,
   type ReplaySpeed,
 } from '../engine/replay'
+import { settingsStore } from '../store/settings'
 
 interface BattleViewProps {
   replay: CombatReplay
@@ -19,12 +21,18 @@ interface BattleViewProps {
 const itemNameById = new Map(items.map((item) => [item.id, item.name]))
 const enemyNameById = new Map(enemies.map((enemy) => [enemy.id, enemy.name]))
 
+type DamageEvent = Extract<CombatEvent, { type: 'damage' }>
+
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value))
 }
 
 function hpPercent(hp: number, maxHp: number): number {
   return maxHp <= 0 ? 0 : clampPercent((hp / maxHp) * 100)
+}
+
+function displayAmount(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
 function sourceLabel(replay: CombatReplay, sourceId: string): string {
@@ -86,6 +94,34 @@ function EventBurst({ replay, events }: { replay: CombatReplay; events: readonly
   )
 }
 
+function DamageNumbers({
+  side,
+  events,
+}: {
+  side: CombatSide
+  events: readonly DamageEvent[]
+}) {
+  const visible = events
+    .filter((event) => event.side === side)
+    .map((event) => ({ event, amount: Math.max(0, event.amount - event.blocked) }))
+    .filter(({ amount }) => amount > 0)
+
+  return (
+    <div className="damage-number-layer" aria-hidden="true">
+      {visible.map(({ event, amount }, index) => (
+        <span
+          key={`${event.t}:${event.side}:${event.kind}:${index}`}
+          className={`damage-number${event.crit ? ' is-crit' : ''}`}
+          style={{ '--damage-index': index } as CSSProperties}
+        >
+          −{displayAmount(amount)}
+          {event.crit ? <b>CRIT</b> : null}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function ActorPanel({
   side,
   name,
@@ -93,6 +129,7 @@ function ActorPanel({
   maxHp,
   block,
   active,
+  damageEvents,
 }: {
   side: CombatSide
   name: string
@@ -100,9 +137,11 @@ function ActorPanel({
   maxHp: number
   block: number
   active: boolean
+  damageEvents: readonly DamageEvent[]
 }) {
   return (
     <section className={`combatant combatant-${side}${active ? ' is-active' : ''}`}>
+      <DamageNumbers side={side} events={damageEvents} />
       <div className="combatant-heading">
         <div>
           <span className="combatant-side">{side === 'player' ? 'PLAYER' : 'ENEMY'}</span>
@@ -124,8 +163,10 @@ function ActorPanel({
 }
 
 export function BattleView({ replay, onComplete }: BattleViewProps) {
+  const settings = useStore(settingsStore)
   const [speed, setSpeed] = useState<ReplaySpeed>(1)
   const [playbackTime, setPlaybackTime] = useState(0)
+  const stageRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -137,6 +178,9 @@ export function BattleView({ replay, onComplete }: BattleViewProps) {
   const frame = getReplayFrameAtTime(replay, playbackTime)
   const snapshot = getReplaySnapshotAtTime(replay, playbackTime)
   const events = frame?.events ?? []
+  const damageEvents = events.filter(
+    (event): event is DamageEvent => event.type === 'damage',
+  )
   const activePlayer = events.some((event) => event.type === 'activate' && event.side === 'player')
   const activeEnemy = events.some((event) => event.type === 'activate' && event.side === 'enemy')
   const progress = getReplayProgress(playbackTime, replay.durationSeconds)
@@ -146,6 +190,24 @@ export function BattleView({ replay, onComplete }: BattleViewProps) {
     () => replay.events.filter((event) => event.t <= playbackTime).slice(-8).reverse(),
     [playbackTime, replay.events],
   )
+  const impactSignature = damageEvents
+    .filter((event) => event.amount - event.blocked > 0)
+    .map((event, index) => `${event.t}:${event.side}:${event.amount}:${index}`)
+    .join('|')
+
+  useEffect(() => {
+    if (impactSignature.length === 0 || settings.reducedEffects) return
+    stageRef.current?.animate(
+      [
+        { transform: 'translate3d(0, 0, 0)' },
+        { transform: 'translate3d(-5px, 2px, 0)' },
+        { transform: 'translate3d(4px, -2px, 0)' },
+        { transform: 'translate3d(-2px, 1px, 0)' },
+        { transform: 'translate3d(0, 0, 0)' },
+      ],
+      { duration: 150, easing: 'ease-out' },
+    )
+  }, [impactSignature, settings.reducedEffects])
 
   return (
     <main className="app-shell battle-screen">
@@ -172,7 +234,7 @@ export function BattleView({ replay, onComplete }: BattleViewProps) {
         <div style={{ width: `${progress * 100}%` }} />
       </div>
 
-      <section className="battle-stage">
+      <section ref={stageRef} className="battle-stage">
         <ActorPanel
           side="player"
           name="Adventurer"
@@ -180,6 +242,7 @@ export function BattleView({ replay, onComplete }: BattleViewProps) {
           maxHp={snapshot.player.maxHp}
           block={snapshot.player.block}
           active={activePlayer}
+          damageEvents={damageEvents}
         />
 
         <div className="battle-center">
@@ -195,6 +258,7 @@ export function BattleView({ replay, onComplete }: BattleViewProps) {
           maxHp={snapshot.enemy.maxHp}
           block={snapshot.enemy.block}
           active={activeEnemy}
+          damageEvents={damageEvents}
         />
       </section>
 

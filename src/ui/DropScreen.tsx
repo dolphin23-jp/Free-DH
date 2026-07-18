@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 
+import { playChestOpeningSound, playRaritySound } from '../audio/sounds'
 import { affixPool, items } from '../data'
 import { resolveAffixEffects } from '../engine/affixes'
 import type { DropBatch, DroppedItem } from '../engine/drops'
 import { codexStore } from '../store/codex'
 import { runStore, type RunInventoryItem } from '../store/run'
+import { settingsStore } from '../store/settings'
 
 interface DropScreenProps {
   batch: DropBatch
@@ -30,6 +32,7 @@ function DropCard({
   drop,
   index,
   opened,
+  opening,
   resolved,
   canClaim,
   onOpen,
@@ -39,6 +42,7 @@ function DropCard({
   drop: DroppedItem
   index: number
   opened: boolean
+  opening: boolean
   resolved: 'claimed' | 'discarded' | undefined
   canClaim: boolean
   onOpen: () => void
@@ -50,9 +54,14 @@ function DropCard({
 
   if (!opened) {
     return (
-      <button type="button" className="drop-chest" onClick={onOpen}>
+      <button
+        type="button"
+        className={`drop-chest${opening ? ' is-opening' : ''}`}
+        onClick={onOpen}
+        disabled={opening}
+      >
         <span>CHEST {index + 1}</span>
-        <strong>タップして開封</strong>
+        <strong>{opening ? '開封中…' : 'タップして開封'}</strong>
       </button>
     )
   }
@@ -89,11 +98,43 @@ function DropCard({
 
 export function DropScreen({ batch, onComplete }: DropScreenProps) {
   const state = useStore(runStore)
+  const settings = useStore(settingsStore)
   const [openedCount, setOpenedCount] = useState(0)
+  const [openingIndex, setOpeningIndex] = useState<number | null>(null)
+  const [legendaryReveal, setLegendaryReveal] = useState<string | null>(null)
   const [decisions, setDecisions] = useState<Record<string, 'claimed' | 'discarded'>>({})
+  const openingTimer = useRef<number | null>(null)
+  const legendaryTimer = useRef<number | null>(null)
   const storageAvailable = state.storage.items.length < state.storage.capacity
   const allOpened = openedCount >= batch.drops.length
   const allResolved = batch.drops.every((drop) => decisions[drop.instanceId] !== undefined)
+
+  useEffect(
+    () => () => {
+      if (openingTimer.current !== null) window.clearTimeout(openingTimer.current)
+      if (legendaryTimer.current !== null) window.clearTimeout(legendaryTimer.current)
+    },
+    [],
+  )
+
+  const revealDrop = (drop: DroppedItem, index: number) => {
+    if (index !== openedCount || openingIndex !== null) return
+    setOpeningIndex(index)
+    playChestOpeningSound()
+    openingTimer.current = window.setTimeout(
+      () => {
+        codexStore.getState().discoverItems([drop.itemId])
+        setOpenedCount((current) => current + 1)
+        setOpeningIndex(null)
+        playRaritySound(drop.rarity)
+        if (drop.rarity === 'legendary' && !settings.reducedEffects) {
+          setLegendaryReveal(drop.instanceId)
+          legendaryTimer.current = window.setTimeout(() => setLegendaryReveal(null), 1100)
+        }
+      },
+      settings.reducedEffects ? 120 : 520,
+    )
+  }
 
   const claimDrop = (drop: DroppedItem) => {
     if (decisions[drop.instanceId] !== undefined || !storageAvailable) return
@@ -114,6 +155,12 @@ export function DropScreen({ batch, onComplete }: DropScreenProps) {
 
   return (
     <main className="app-shell drop-screen">
+      {legendaryReveal !== null ? (
+        <div className="legendary-reveal" role="status" aria-live="assertive">
+          <span>LEGENDARY</span>
+        </div>
+      ) : null}
+
       <header className="drop-header">
         <div>
           <p className="eyebrow">Victory reward</p>
@@ -133,14 +180,10 @@ export function DropScreen({ batch, onComplete }: DropScreenProps) {
             drop={drop}
             index={index}
             opened={index < openedCount}
+            opening={openingIndex === index}
             resolved={decisions[drop.instanceId]}
             canClaim={storageAvailable}
-            onOpen={() => {
-              if (index === openedCount) {
-                codexStore.getState().discoverItems([drop.itemId])
-                setOpenedCount((current) => current + 1)
-              }
-            }}
+            onOpen={() => revealDrop(drop, index)}
             onClaim={() => claimDrop(drop)}
             onDiscard={() => discardDrop(drop)}
           />

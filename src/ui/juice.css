@@ -1,0 +1,160 @@
+.damage-number-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.damage-number {
+  --damage-index: 0;
+  position: absolute;
+  top: calc(28% + var(--damage-index) * 1.5rem);
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  color: #ffb099;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 1000;
+  line-height: 1;
+  text-shadow: 0 0.15rem 0 #48150d, 0 0 1.2rem rgb(255 92 55 / 56%);
+  animation: damage-float 560ms cubic-bezier(0.16, 0.85, 0.32, 1) both;
+}
+
+.damage-number b {
+  margin-top: 0.2rem;
+  color: #ffe28a;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+
+.damage-number.is-crit {
+  color: #fff0a8;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  text-shadow: 0 0.15rem 0 #67450d, 0 0 1.6rem rgb(255 214 82 / 72%);
+}
+
+@keyframes damage-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0.7rem) scale(0.72);
+  }
+  28% {
+    opacity: 1;
+    transform: translate(-50%, -0.25rem) scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -3.2rem) scale(0.96);
+  }
+}
+
+.drop-chest:disabled {
+  cursor: wait;
+}
+
+.drop-chest.is-opening {
+  animation: chest-charge 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.drop-chest.is-opening::before {
+  animation: chest-lock-charge 520ms ease-in-out both;
+}
+
+.legendary-reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle, rgb(255 231 133 / 34%), transparent 28%),
+    rgb(255 181 44 / 8%);
+  pointer-events: none;
+  animation: legendary-flash 1.1s ease-out both;
+}
+
+.legendary-reveal::before,
+.legendary-reveal::after {
+  content: "";
+  position: absolute;
+  width: 140vmax;
+  height: 0.2rem;
+  background: linear-gradient(90deg, transparent, #fff2ae, transparent);
+  box-shadow: 0 0 2rem #ffc44f;
+}
+
+.legendary-reveal::before {
+  transform: rotate(35deg);
+}
+
+.legendary-reveal::after {
+  transform: rotate(-35deg);
+}
+
+.legendary-reveal span {
+  position: relative;
+  z-index: 1;
+  color: #fff3b8;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.5rem, 11vw, 8rem);
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-shadow: 0 0.15rem 0 #7a4810, 0 0 3rem #ffbc35;
+  animation: legendary-title 1.1s cubic-bezier(0.18, 0.82, 0.2, 1) both;
+}
+
+@keyframes chest-charge {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0) scale(1);
+  }
+  55% {
+    filter: brightness(1.4);
+    transform: translateY(0.2rem) scale(0.97);
+  }
+  100% {
+    filter: brightness(2);
+    transform: translateY(-0.4rem) scale(1.04);
+  }
+}
+
+@keyframes chest-lock-charge {
+  0% {
+    box-shadow: 0 0 2rem rgb(238 185 76 / 24%);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 4rem rgb(255 224 119 / 78%);
+    transform: scale(1.18);
+  }
+}
+
+@keyframes legendary-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes legendary-title {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-4deg);
+  }
+  32% {
+    opacity: 1;
+    transform: scale(1.08) rotate(1deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.2) rotate(0);
+  }
+}
