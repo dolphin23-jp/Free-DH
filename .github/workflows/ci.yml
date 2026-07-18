@@ -36,14 +36,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: T23 focused parameter search
-        run: pnpm exec vite build --config vite.t23-search.config.ts --logLevel error && node .t23-search-dist/search.mjs > t23-search.txt
+      - name: T23 expanded boundary search
+        run: pnpm exec vite build --config vite.t23-search2.config.ts --logLevel error && node .t23-search2-dist/search2.mjs > t23-search2.txt
 
       - name: Upload T23 search
         uses: actions/upload-artifact@v4
         with:
-          name: t23-parameter-search
-          path: t23-search.txt
+          name: t23-boundary-search
+          path: t23-search2.txt
 
       - name: Build
         run: pnpm build
