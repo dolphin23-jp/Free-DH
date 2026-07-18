@@ -4,11 +4,15 @@ import type {
   CombatTriggerEffect,
   ResolvedItemModifiersInput,
 } from './combat'
-import { battleResolutionFromCombatState, type BattleResolution } from '../store/run'
 
 export interface ResolvedAffixEffects {
   resolvedModifiers?: ResolvedItemModifiersInput
   resolvedTriggers?: CombatTriggerEffect[]
+}
+
+interface CombatVitalsResolution {
+  playerHp: number
+  playerMaxHp: number
 }
 
 function addModifier(
@@ -81,8 +85,10 @@ function getTemporaryBattleStartMaxHp(state: CombatState): number {
  * that temporary equipment contribution before handing the result back to the
  * run store, preventing it from accumulating again next battle.
  */
-export function battleResolutionFromAffixedCombatState(state: CombatState): BattleResolution {
-  const resolution = battleResolutionFromCombatState(state)
+export function removeTemporaryAffixMaxHp<T extends CombatVitalsResolution>(
+  state: CombatState,
+  resolution: T,
+): T {
   const temporaryMaxHp = getTemporaryBattleStartMaxHp(state)
   if (temporaryMaxHp === 0) return resolution
 
